@@ -1,3 +1,6 @@
+import numpy as np
+import pandas as pd
+
 class pressure_tap:
     
     '''
@@ -12,8 +15,8 @@ class pressure_tap:
         x = the x coordinate of the pressure tap. The center of the wall is consider zero which means x can be negative. The coordinates of full scale values.
         z = the z coordinate of the pressure tap/ the height in which the tap is located. The bottom of the wall is considered zero. The coordinates of full scale values.
         z_index = the index/location of the current tap's height within the height matrix.
-        wall_width = the width dimension of the current home wall.
-        wall_height = the height dimension of the current home wall.
+        surface_width = the width dimension of the current home surface.
+        surface_height = the height dimension of the current home wall.
         tap_cp = the cp time history for the tap.
 
     Additional Variables
@@ -33,7 +36,7 @@ class pressure_tap:
 
     Class Methods:
 
-    __init__ (self, tap_id, tap_index, x, z, z_index = None, home_wall = None, wall_width = None, wall_height=None)
+    __init__ (self, tap_id, tap_index, x, z, z_index = None, home_wall = None, surface_width = None, surface_height=None)
         Import the information required to create the pressure_tap instances. Required Information: tap_id, tap_index, x, z. The other values are set to None by default and can be set later on.
 
     surrounding_taps(self,tap_array,x_coor,z_coor)
@@ -60,28 +63,27 @@ class pressure_tap:
         This method should be called current pressure tap has been identified as missing and the adjacent taps are also missing (Typically used if there is a ring of bad taps/ broken scanner). 
             The cp is estimated using an average of cp values from the tap above and below the current tap.  
             pressure_taps is a dictionary of pressure taps instances. Returns the estimated cp time history.
-    
-    
     '''
 
-    def __init__(self, tap_id, tap_index, x, z, z_index = None, home_wall = None, wall_width = None, wall_height=None):
+    def __init__(self, tap_id, tap_index, x, z, z_index = None, home_wall = None, surface_width = None, surface_height=None):
 
-        self.tap_id=tap_id                          
-        self.tap_index= tap_index
+        self.tap_id=tap_id                        
+        self.tap_index= int(tap_index)
         self.home_wall = home_wall                   
         self.x = x
         self.z = z
         self.z_index = z_index
-        self.wall_width = wall_width
-        self.wall_height = wall_height
+        self.surface_width = surface_width
+        self.surface_height = surface_height
         self.tap_cp = None
-    def surrounding_taps(self,tap_array,x_coor,z_coor):
 
+    def surrounding_taps(self,tap_array,x_coor,z_coor):
+        
         '''
         Description/ Methodology 
 
-        This method takes an array of the pressure tap ids for the current surface and determines the surrounding tap ids relative to the current tap. 
-        x_index is the current taps location within the x_coor list. z_index is the current taps location within the z_coor list. The ideas are saved under there corresponding variable.
+        This method uses a new methodology to determine the surrounding taps for a given tap. It will continune to check its surroundings until if finds a usable tap or the wall. This is an
+        improvement over the pervious design of this function. 
 
         left = tap to the left of the current tap.
         below = tap below the current tap.
@@ -89,7 +91,6 @@ class pressure_tap:
         above = tap above the current tap.
 
         These values are later used to calculate the tributary area dimensions of the tap.
-        
 
         if x_index is zero, that means that the current tap is the left most tap within the ring and therefore, no taps are located to the left of the current tap.
         if x_index is equal to the last index of the list, that means that the current tap is the right most tap along the ring and therefore, no taps are located to the right of the current tap.
@@ -100,35 +101,53 @@ class pressure_tap:
         if z_index is inbetween the first and last index, there must be a tap above and below of the current tap.
 
         '''
-
-
-
+        import numpy as np
+        import math
 
         x_index = x_coor.index(self.x)
         z_index = z_coor.index(self.z)
 
-        if not x_index: # if x_index is zero, the if statement is true
+        
+        left_missing = True
+        right_missing = True
+        #Check left tap
+        for offset in np.arange(x_coor.index(self.x),0,-1):
+            if not math.isnan(float(tap_array[z_index,offset-1])):
+                self.left=tap_array[z_index,offset-1]
+                left_missing = False
+                break
+        #Check right tap
+        for offset in np.arange(x_coor.index(self.x),len(x_coor)-1,1):
+            if not math.isnan(float(tap_array[z_index,offset+1])):
+                self.right=tap_array[z_index,offset+1]
+                right_missing = False
+                break
 
-            self.left='wall_left' # no taps to the left.
-            self.right=tap_array[z_index,x_index+1]
+        if left_missing:
+            self.left = 'wall_left'
+        if right_missing:
+            self.right = 'wall_right'
 
-        elif x_index==(len(x_coor)-1): # if x_index is the last index of the list, the if statement is true.
-            self.right='wall_right' # no taps to the right.
-            self.left=tap_array[z_index,x_index-1]
+        top_missing = True
+        below_missing = True
+        #Check top tap
+        for offset in np.arange(z_coor.index(self.z),0,-1):
+            if not math.isnan(float(tap_array[offset-1,x_index])):
+                self.above=tap_array[offset-1,x_index]
+                top_missing = False
+                break
+        #Check bottom tap
+        for offset in np.arange(z_coor.index(self.z),len(z_coor)-1,1):
+            if not math.isnan(float(tap_array[offset+1,x_index])):
+                self.below=tap_array[offset+1,x_index]
+                below_missing = False
+                break
 
-        else: # if x_index is neither first or last, therefore taps must be located to the left and right of the current tap.
-            self.right=tap_array[z_index,x_index+1]
-            self.left=tap_array[z_index,x_index-1]
+        if top_missing:
+            self.above = 'top'
+        if below_missing:
+            self.below = 'ground'
 
-        if z_index==(len(z_coor)-1): # if x_index is the last index of the list, the if statement is true.
-            self.above=tap_array[z_index-1,x_index]
-            self.below='ground' # no taps below.
-        elif not z_index: # if x_index is zero, the if statement is true
-            self.above='top'  # no taps above.
-            self.below=tap_array[z_index+1,x_index]
-        else: # if x_index is neither first or last, therefore taps must be a tap above and below of the current tap.
-            self.above=tap_array[z_index-1,x_index]
-            self.below=tap_array[z_index+1,x_index]
 
     def tap_trib_dim_nc(self,pressure_taps):
         
@@ -139,11 +158,11 @@ class pressure_tap:
         the method calculates the different between current taps and the surrounding taps using their x and z values. The distance between the current tap and the surrounding is divided by two.
         This action is performed on their side of the current tap and summed to determine the dimension. The width is calculated using the left and right variable (using their x values) 
         and the height is calcuated using the above and below variables (using their z values). If a tap is along a surface edge ( variable contains either wall_right,wall_left, top or ground),
-        the x or z values is assumed to be the wall width/wall_height or zero.
+        the x or z values is assumed to be the wall width/surface_height or zero.
 
         if left = wall_left, the x value of the "tap" on the left = 0
-        if right = wall_right, the x value of the "tap" on the left = wall_width
-        if above = top, the z value of the "tap" above = wall_height
+        if right = wall_right, the x value of the "tap" on the left = surface_width
+        if above = top, the z value of the "tap" above = surface_height
         if below = ground, the z value of the "tap" below = 0
 
         This method assumes the origin is located at the bottom left corner of the surface. See Pressure_Tap_NC.xlsx as an example of the input file.      
@@ -161,8 +180,10 @@ class pressure_tap:
             self.r = self.x #the moment arm about the origin
             
         elif self.right=='wall_right':
+            if self.left == 'wall_left':
+                x_neg_1 =self.surface_width
             x_neg_1 = pressure_taps[self.left].x # the value on the left is the x value of the tap on the left side.
-            x_plus_1 =self.wall_width # No taps to the right, therefore the "tap"/ x value is the wall width.
+            x_plus_1 =self.surface_width # No taps to the right, therefore the "tap"/ x value is the wall width.
             self.width = (float(x_plus_1)-float(self.x))+(float(self.x)-float(x_neg_1)/2) # the width of the pressure tap tributary area is half the distance between the current tap and the tap on the left and the full distance between the wall edge and the current tap.
             
             self.r = self.x #the moment arm about the origin
@@ -180,14 +201,13 @@ class pressure_tap:
             
         elif self.above=='top':
             z_neg_1 = pressure_taps[self.below].z  # the value below is the z value of the tap below.
-            z_plus_1 =self.wall_height # No taps above, therefore the "tap"/z value is the wall height.
+            z_plus_1 =self.surface_height # No taps above, therefore the "tap"/z value is the wall height.
             self.height = (float(z_plus_1)-float(self.z))+(float(self.z)-float(z_neg_1)/2) # the height of the pressure tap tributary area is half the distance between the current tap and the tap below and the full distance between the top edge and the current tap.
             
         else:
             z_neg_1 = pressure_taps[self.below].z # the value below is the z value of the tap below.
             z_plus_1 =pressure_taps[self.above].z # the value above is the z value of the tap above.
             self.height = (float(z_plus_1)-float(self.z)/2)+(float(self.z)-float(z_neg_1)/2)  # the height of the pressure tap tributary area is half the distance between the current tap and the tap below and above.
-            
 
 
 
@@ -200,14 +220,14 @@ class pressure_tap:
         the method calculates the different between current taps and the surrounding taps using their x and z values. The distance between the current tap and the surrounding is divided by two.
         This action is performed on their side of the current tap and summed to determine the dimension. The width is calculated using the left and right variable (using their x values) 
         and the height is calcuated using the above and below variables (using their z values). If a tap is along a surface edge ( variable contains either wall_right,wall_left, top or ground),
-        the x or z values is assumed to be the +/- wall width/2 or wall_height or zero.
+        the x or z values is assumed to be the +/- wall width/2 or surface_height or zero.
 
         This method assumes the origin is located at the bottom center of the surface. See Pressure_Tap.xlsx as an example of the input file.   
         The left is direction is considered the negative side and the right side of the origin is the positive half.
 
-        if left = wall_left, the x value of the "tap" on the left = - wall_width/2
-        if right = wall_right, the x value of the "tap" on the left = wall_width/2
-        if above = top, the z value of the "tap" above = wall_height
+        if left = wall_left, the x value of the "tap" on the left = - surface_width/2
+        if right = wall_right, the x value of the "tap" on the left = surface_width/2
+        if above = top, the z value of the "tap" above = surface_height
         if below = ground, the z value of the "tap" below = 0
 
         This method assumes the origin is located at the bottom center of the surface. See Pressure_Tap.xlsx as an example of the input file.      
@@ -217,13 +237,19 @@ class pressure_tap:
        
         '''
         if self.left=='wall_left':
-            x_neg_1 = -self.wall_width/2 # No taps to the left, therefore the "tap"/x value is half the building width on the negative size.
-            x_plus_1 =pressure_taps[self.right].x # the value on the right is the x value of the tap on the right side.
+            x_neg_1 = -1*self.surface_width/2 # No taps to the left, therefore the "tap"/x value is half the building width on the negative size.
+            if self.right == 'wall_right':
+                x_plus_1 = self.surface_width/2
+            else:
+                x_plus_1 =pressure_taps[self.right].x # the value on the right is the x value of the tap on the right side.
             self.width = abs((float(x_plus_1)-float(self.x)))/2+abs((float(x_neg_1)-float(self.x))) # the width of the pressure tap tributary area is half the distance between the current tap and the tap on the right and the full distance between the wall edge and the current tap.
             
         elif self.right=='wall_right':
-            x_neg_1 = pressure_taps[self.left].x # the value on the left is the x value of the tap on the left side.
-            x_plus_1 =self.wall_width/2 # No taps to the right, therefore the "tap"/ x value is the wall width.
+            if self.right == 'wall_left':
+                x_neg_1 = -1*self.surface_width/2
+            else:
+                x_neg_1 = pressure_taps[self.left].x # the value on the left is the x value of the tap on the left side.
+            x_plus_1 =self.surface_width/2 # No taps to the right, therefore the "tap"/ x value is the wall width.
             self.width = abs((float(x_plus_1)-float(self.x)))+abs((float(x_neg_1)-float(self.x)))/2 # the width of the pressure tap tributary area is half the distance between the current tap and the tap on the left and the full distance between the wall edge and the current tap.
             
         else:
@@ -236,12 +262,19 @@ class pressure_tap:
 
         if self.below=='ground':
             z_neg_1 = 0 # No taps below, therefore the "tap"/z value is zero.
-            z_plus_1 =pressure_taps[self.above].z # the value above is the z value of the tap above.
+            if self.above =='top':
+                z_plus_1 = self.surface_height
+            else:
+                z_plus_1 =pressure_taps[self.above].z # the value above is the z value of the tap above.
             self.height =  (float(z_plus_1)-float(self.z)/2)+(float(self.z)-float(z_neg_1)) # the height of the pressure tap tributary area is half the distance between the current tap and the tap above and the full distance between the bottom edge and the current tap.
             
         elif self.above=='top':
-            z_neg_1 = pressure_taps[self.below].z # the value below is the z value of the tap below.
-            z_plus_1 =self.wall_height # No taps above, therefore the "tap"/z value is the wall height.
+           
+            if self.below == 'ground':
+                z_neg_1 = 0
+            else:
+                z_neg_1 = pressure_taps[self.below].z # the value below is the z value of the tap below.     
+            z_plus_1 =self.surface_height # No taps above, therefore the "tap"/z value is the wall height.
             self.height = (float(z_plus_1)-float(self.z))+(float(self.z)-float(z_neg_1)/2) # the height of the pressure tap tributary area is half the distance between the current tap and the tap below and the full distance between the top edge and the current tap.
             
         else:
@@ -274,7 +307,7 @@ class pressure_tap:
 
         This method is uses the taps index value to extract the cp time history from the cp_data array. The cp time history is returned from this method.
         '''
-
+        
         tap_cp = cp_data[:,self.tap_index]
 
         return tap_cp
@@ -354,7 +387,6 @@ class pressure_tap:
         self.tap_cp = (pressure_taps[pressure_taps[self.tap_id].below].tap_cp+ pressure_taps[pressure_taps[self.tap_id].above].tap_cp)/2
 
         return self.tap_cp
-
 
 
 class building_floor:
@@ -565,6 +597,7 @@ class building_floor:
         return force_x, force_y, moment_z, area
 
 
+
 class wind_tunnel_test:
     '''
      
@@ -576,11 +609,11 @@ class wind_tunnel_test:
         ###########################################################################################
         VARIABLES ASSOCIATED WITH THE FULL SCALE BUILDING
         building_story = the number of building stories within the test building.
-        building_walls= the names of the different surfaces of the structure.
-        building_walls_angle = the wind angle of attack where the surface is facing the windward. The location of the value corresponds to wall name provided in building_walls
-        building_width = the width of the corresponding wall provided in building_walls.
+        building_surfaces= the names of the different surfaces of the structure.
+        building_walls_angle = the wind angle of attack where the surface is facing the windward. The location of the value corresponds to wall name provided in building_surfaces
+        building_width = the width of the corresponding wall provided in building_surfaces.
         building_floor_height = the single storey height of a floor.
-        building_height = height of the building assumed all the stories have the same floor height.
+        building_dim = the x,y,z dimensions of the building. (Assuming a simple rectangular prism)
         ###########################################################################################
 
         ###########################################################################################
@@ -656,50 +689,118 @@ class wind_tunnel_test:
         The method return the three force time histories.
 
     print_contour_simple(self,folder)
-        This method creates and save contour plots of each surface within the building_walls variable. Currently, the method only plots the mean value.
+        This method creates and save contour plots of each surface within the building_surfaces variable. Currently, the method only plots the mean value.
 
     '''
 
     def __init__(self, config_file):
         import numpy as np
         import pandas as pd
+        from AutoCAD_Layout_2D import autoCAD_ref_cardir
         
         #import from config file
+        
+        
+        data_input_method  = config_file['test_config'][0]['building_config']['data_input']
+        
+        if data_input_method=='AutoCAD':
 
-       
-        self.building_story = config_file['test_config'][0]['building_config']['stories']
-        self.building_walls= config_file['test_config'][0]['building_config']['walls']
-        self.building_walls_angle = config_file['test_config'][0]['building_config']['wall_angles']
-        self.building_width = config_file['test_config'][0]['building_config']['wall_width']
-        self.building_floor_height = config_file['test_config'][0]['building_config']['floor_height']
-        self.building_height = self.building_story*self.building_floor_height
-        self.tunnel_starting_tap = int(config_file['test_config'][1]['tunnel_model']['starting_tap'])
-        self.tunnel_missing_taps = config_file['test_config'][1]['tunnel_model']['missing_taps']
-        self.tunnel_tap_map = config_file['test_config'][1]['tunnel_model']['tap_map']
-        self.tunnel_tap_layout_filepath = config_file['test_config'][1]['tunnel_model']['tap_layout_file']
-        self.tunnel_gradient_v = config_file['test_config'][1]['tunnel_model']['gradient_v']
-        self.tunnel_gradient_h = config_file['test_config'][1]['tunnel_model']['gradient_h']
-        self.loading_air_density  = config_file['test_config'][2]['loading']['air_density']
-        self.loading_velocity = config_file['test_config'][2]['loading']['velocity']
-        # Initializing variables 
+            self.building_surfaces= config_file['test_config'][0]['building_config']['walls']
+            self.building_walls_angle = config_file['test_config'][0]['building_config']['wall_angles']
+            self.building_dim = config_file['test_config'][0]['building_config']['building_dim']
+            
+            self.building_story = config_file['test_config'][0]['building_config']['stories']
+            self.building_story = config_file['test_config'][0]['building_config']['floor_height']
+            
+            self.tunnel_starting_tap = int(config_file['test_config'][1]['tunnel_model']['starting_tap'])
+            self.tunnel_missing_taps = config_file['test_config'][1]['tunnel_model']['missing_taps']
+            input_file = config_file['test_config'][1]['tunnel_model']['autoCAD_file']
+            roof = config_file['test_config'][0]['building_config']['roof_name']
+            self.broken_scanners_id = config_file['test_config'][1]['tunnel_model']['broken_scanner_ids']
+            self.tunnel_gradient_v = config_file['test_config'][1]['tunnel_model']['gradient_v']
+            self.tunnel_gradient_h = config_file['test_config'][1]['tunnel_model']['gradient_h']
+            self.loading_air_density  = config_file['test_config'][2]['loading']['air_density']
+            self.loading_velocity = config_file['test_config'][2]['loading']['velocity']
+            self.tunnel_tap_map,self.tap_xyz = autoCAD_ref_cardir(input_file,'North',roof)
+            '''
+            if 'stories' in config_file['test_config'][0]['building_config']:
+                self.building_story = config_file['test_config'][0]['building_config']['stories']
+            else:
+                self.building_story = None
+            if 'floor_height' in config_file['test_config'][0]['building_config']:
+                    self.building_story = config_file['test_config'][0]['building_config']['floor_height']
+            else:
+                self.building_floor_height = None 
+            '''
+            self.PLW_layout = config_file['test_config'][0]['PLW']['PLW_layout_file']
+            self.PLW_ref_velocity = config_file['test_config'][0]['PLW']['Ref_Velocity']
+
+
+
+        else:
+            
+            self.building_surfaces= config_file['test_config'][0]['building_config']['surfaces']
+            self.building_walls_angle = config_file['test_config'][0]['building_config']['wall_angles']
+            self.building_dim = config_file['test_config'][0]['building_config']['building_dim']
+
+            if 'stories' in config_file['test_config'][0]['building_config']:
+                self.building_story = config_file['test_config'][0]['building_config']['stories']
+            else:
+                self.building_story = None
+            if 'floor_height' in config_file['test_config'][0]['building_config']:
+                self.building_floor_height = config_file['test_config'][0]['building_config']['floor_height']
+            else:
+                self.building_floor_height = None 
+            
+    
+            self.tunnel_starting_tap = int(config_file['test_config'][1]['tunnel_model']['starting_tap'])
+            self.tunnel_missing_taps = config_file['test_config'][1]['tunnel_model']['missing_taps']
+            self.broken_scanners_id = config_file['test_config'][1]['tunnel_model']['broken_scanner_ids']
+            #self.tunnel_tap_map = config_file['test_config'][1]['tunnel_model']['tap_map']
+            self.tunnel_tap_layout_filepath = config_file['test_config'][1]['tunnel_model']['tap_layout_file']
+            self.tunnel_gradient_v = config_file['test_config'][1]['tunnel_model']['gradient_v']
+            self.tunnel_gradient_h = config_file['test_config'][1]['tunnel_model']['gradient_h']
+            self.loading_air_density  = config_file['test_config'][2]['loading']['air_density']
+            self.loading_velocity = config_file['test_config'][2]['loading']['velocity']
+            self.tap_xyz = None
+            self.PLW_layout = config_file['test_config'][0]['PLW']['PLW_layout_file']
+            self.PLW_ref_velocity = config_file['test_config'][0]['PLW']['Ref_Velocity']
+
+
+
+
+
         self.angle = None
         self.name = None
         self.alpha = None
         self.exposure = None
 
-        
-
         #Create list of pressure taps used during the test 
+    def tap_list_gen (self):    
+        import numpy as np
+        import pandas as pd
+
         self.pressure_tap_list=[]
-        for _,value in self.tunnel_tap_map.items():
+
+        for index, sheet in enumerate(self.building_surfaces):
             
-            self.pressure_tap_list.extend(value)
+            df = pd.read_excel(r'{}'.format(self.tunnel_tap_layout_filepath),sheet_name= sheet ,header=0,index_col=0)
+            tap_id_list=df.copy().values.flatten().tolist()
+            tap_id_list = [x for x in tap_id_list if str(x) != 'nan']
+
+            
+            self.pressure_tap_list.extend(tap_id_list)
         
         self.pressure_tap_list.sort()
         
+
         self.pressure_tap_index =[i for i in np.arange((self.pressure_tap_list[0]-self.tunnel_starting_tap),(len(self.pressure_tap_list)+(self.pressure_tap_list[0]-self.tunnel_starting_tap)))]
         
+        
+    def floor_list_gen(self):
         #Create list of building floors within the structure
+        import numpy as np
+        import pandas as pd
         self.floors_elev = [ f for f in np.arange(self.building_floor_height,self.building_floor_height*self.building_story,self.building_floor_height)]
         
         self.floors= []
@@ -709,16 +810,24 @@ class wind_tunnel_test:
             else:
                 self.floors.append(building_floor(index,self.building_floor_height,floor))
         
-
-        
-        
+    def surface_list_gen(self):
+        self.surface_dim = {}
+        for sur in self.building_surfaces:
+            if sur.lower() == 'roof':
+                self.surface_dim[sur] = [self.building_dim[0],self.building_dim[1]]
+            elif sur.lower() in ['north','south']:
+                self.surface_dim[sur] = [self.building_dim[0],self.building_dim[2]]
+            else:
+                self.surface_dim[sur] = [self.building_dim[1],self.building_dim[2]]
+    def tap_layout_excel(self):
         # Import tap layout data from the excel file and create the dictionary
-        
+        import numpy as np
+        import pandas as pd
         self.tap_class_dict={}
         self.columns= []
         self.rows= []
         self.tap_layout = []
-        for index, sheet in enumerate(self.building_walls):
+        for index, sheet in enumerate(self.building_surfaces):
             
             df = pd.read_excel(r'{}'.format(self.tunnel_tap_layout_filepath),sheet_name= sheet ,header=0,index_col=0)
             self.tap_layout.append(df)
@@ -727,12 +836,14 @@ class wind_tunnel_test:
             self.rows.append(df.index.tolist()) 
             
             tap_id_list=df.copy().values.flatten().tolist()
-
+            tap_id_list = [x for x in tap_id_list if str(x) != 'nan']
             df_array=np.array(df)
-            # checks each tap id extracted from the excel file is they have been identified as missing
+            
+                
             for tap_id in tap_id_list:
+
                 missing_tap = False
-                if tap_id in self.tunnel_missing_taps: # if the tap is considered missing, the pressure_tap class variable missing_tap is assigned to be true.
+                if tap_id in self.tunnel_missing_taps:
                     missing_tap=True
                 
                 axis_z,axis_x=np.where(df_array==tap_id)
@@ -741,39 +852,47 @@ class wind_tunnel_test:
                 x = self.columns[index][axis_x[0]]
                 z = self.rows[index][axis_z[0]]
                 
-                tap_instance= pressure_tap(tap_id,self.pressure_tap_index[self.pressure_tap_list.index(tap_id)],x,z,axis_z[0],sheet,self.building_width[index],wall_height= self.building_height)
-                tap_instance.wall_angle = self.building_walls_angle[index]
+                tap_instance= pressure_tap(tap_id,self.pressure_tap_index[self.pressure_tap_list.index(tap_id)],x,z,axis_z[0],sheet,surface_width=self.surface_dim[sheet.lower()][0],surface_height=self.surface_dim[sheet.lower()][1])
+                if sheet.lower() =='roof':
+                    pass
+                else:
+                    tap_instance.wall_angle = self.building_walls_angle[index]
                 tap_instance.surrounding_taps(df_array,self.columns[index],self.rows[index])
                 tap_instance.missing_tap = missing_tap
                 self.tap_class_dict[tap_id] = tap_instance
-        # Calculates the tributary dimensions of each tap and stores them within the instance.
         for _, value in self.tap_class_dict.items():
             value.tap_trib_dim(self.tap_class_dict)
-        
+
 
 
     def cp_extraction(self, file_pssr,file_pssd):
         from readPSSfile import readPSSfile
+        import numpy as np
 
-        self.broken_scanner = [1601,1602,1603,1604,1605,1606,1607,1608,1609,1610,1611,1612,1613,1614,1615,1616]
-        self.velocity_conversion_factor = ((self.tunnel_gradient_h/self.building_height)**self.alpha)**2
-
-
+        #create list of broken scanners
+        self.broken_scanner = []
+        for scanner_num in self.broken_scanners_id:
+            for i in np.arange(1,17):
+                self.broken_scanner.append(int(scanner_num)*100+i)
+        self.velocity_conversion_factor = ((self.tunnel_gradient_h/self.building_dim[2])**self.alpha)**2
 
         [cp_data,analog,header]=readPSSfile(file_pssr,file_pssd)
-        
+        self.cp_data = cp_data 
+        max_building_scanner = (int(str(max(self.pressure_tap_list))[:-2])*16)
 
+
+        self.building_cp_data = cp_data[:,:max_building_scanner]
+        self.PLW_cp_TH = cp_data[:,-len(self.pressure_tap_list):]
         
-        cp_data = cp_data *(self.velocity_conversion_factor)
-        
-        
-        self.cp_data= cp_data
+        self.building_cp_data = self.building_cp_data *(self.velocity_conversion_factor)
+
+        self.building_cp_data = self.building_cp_data
         self.analog = analog
         self.header = header      
-        self.filtered_cp_data={key:[] for key in self.building_walls}
-        
         for _,tap in self.tap_class_dict.items():
-            tap.tap_cp = tap.find_tap_cp(self.cp_data)
+            tap.tap_cp = tap.find_tap_cp(self.building_cp_data)
+    
+    def cp_estimation(self):
         
         for tap_id in self.pressure_tap_list:
             
@@ -783,18 +902,32 @@ class wind_tunnel_test:
         
         for tap_id in self.broken_scanner:
             self.tap_class_dict[tap_id].cp_data = self.tap_class_dict[tap_id].cp_fix_vertical(self.tap_class_dict)
-        
+    
+    def surface_filter(self):
+        self.filtered_cp_data={key:[] for key in self.building_surfaces}
         for tap_id in self.pressure_tap_list:
             
+    
+            
             self.filtered_cp_data[self.tap_class_dict[tap_id].home_wall].append(self.tap_class_dict[tap_id].tap_cp)     
+        
+    def PWL(self):
 
+        self.PWL_data = PLW(self.PLW_layout)
+        self.PWL_data.PLW_cp = self.PLW_cp_TH
+        self.PWL_data.ref_vel = self.PLW_ref_velocity
+        self.PWL_data.air_density = self.loading_air_density
 
+    
+    
+    
+    
+    
     def taps_per_floor(self):
 
         # Import taps class into the floor class
         for floor in self.floors:
             floor.floor_taps(self.tap_class_dict,self.rows[0])
-
 
 
     def wind_loading(self):
@@ -812,7 +945,7 @@ class wind_tunnel_test:
             self.moment_z.append(moment_z)
             self.area.append(area)
 
-    def print_contour_simple(self,folder):
+    def print_contour_simple(self,folder,print_taps):
     
         
         import matplotlib.pyplot as plt
@@ -821,11 +954,15 @@ class wind_tunnel_test:
         import matplotlib
         import numpy as np
         from scipy.interpolate import interp2d
+        from scipy.interpolate import Rbf
+        from scipy.interpolate import griddata
         plt.close('all')
-        fig, ax = plt.subplots(1,len(self.building_walls),figsize=(20,15))
+        fig, ax = plt.subplots(1,len(self.building_surfaces)-1,figsize=(20,15))
         plt.suptitle(self.name)
         mean_cp_total = []
-        for _, taps in self.filtered_cp_data.items():
+        for name, taps in self.filtered_cp_data.items():
+            if name =='roof':
+                continue
             for tap in taps:
                 mean_cp_total.append(np.mean(tap))
 
@@ -833,48 +970,88 @@ class wind_tunnel_test:
         cp_min = min(mean_cp_total)
 
         
-        for index,name in enumerate(self.building_walls):
+        for index,name in enumerate(self.building_surfaces):
+            if name == 'roof':
+                continue
+            
             #fig, ax = plt.subplots()
             tap_layout_current = self.tap_layout[index]
             
+            x = []
+            y = []
+            tap_list =tap_layout_current.copy().values.flatten().tolist()
+            tap_list = [x for x in tap_list if str(x) != 'nan']
+            for tap_id in tap_list :
+                x.append(self.tap_class_dict[tap_id].x)
+                y.append(self.tap_class_dict[tap_id].z)
+
+            x= np.array(x)
+            y= np.array(y)
+
             mean_cp = []
             for tap in self.filtered_cp_data[name]:
                 mean_cp.append(np.mean(tap))
 
-            x, y = np.meshgrid(self.columns[index],self.rows[index])
-            #data = np.array(mean_cp).reshape(len(self.columns[index]),len(self.rows[index]))
+            
+
             data = np.array(mean_cp)
+            #fake_cp = np.ones(data.shape)
+            #data = fake_cp
+            #np.savetxt('{}\{}_{}_mean_cp.csv'.format(folder,self.name,name),data)
             
             
             grid_data = interp2d(
-                self.columns[index],self.rows[index],data.reshape((len(self.rows[index]),len(self.columns[index]))),
-                bounds_error = False, fill_value= None)
+                x,y,data, kind ='cubic',
+                bounds_error = False, fill_value= 0)
             
-            new_x = np.linspace((-self.building_width[index]/2),(self.building_width[index]/2))
-            new_y = np.linspace(0,self.building_height)
- 
+            '''
+            grid_data = Rbf(
+                x,y,data)
+            '''
+
+            new_x = np.linspace((-self.surface_dim[name][0]/2),(self.surface_dim[name][0]/2),200)
+            new_y = np.linspace(0,self.surface_dim[name][1],200)
+            ''' 
+            new_x,new_y = np.meshgrid(new_x,new_y)
+            points = np.vstack((x,y)).T
             
+            zz = griddata(points,data,(new_x,new_y), method = 'cubic')
+
+            '''
+
             zz= grid_data(new_x,new_y)
-            
+
+
+
+
             matplotlib.rcParams['contour.negative_linestyle'] = 'solid'
+            
+
             
             CS = ax[index].contour(new_x,new_y,zz,5,colors='k')
             (ax[index].contourf(new_x,new_y,zz,5,cmap=cm.jet,vmin = cp_min, vmax = cp_max))
-            
             ax[index].clabel(CS, CS.levels, inline=True,fontsize = 10)
 
             ax[index].set_title('{} wall'.format(name.capitalize()))
             
             if index !=0:
                 ax[index].axes.get_yaxis().set_ticks([])
-             
+            
             SS = ax[index].scatter(x,y,1,c='k')
             
-
+            if print_taps: 
+                for x, y in zip(x,y):
+                    text = tap_layout_current.loc[y,x]
+                    ax[index].text(x,y+10,text, rotation = 'vertical', fontweight = 'bold')
+            
+            #SS = ax.scatter(x,y,1,c='k')
         
-
+        
+        
+        #CB = fig.colorbar(CS, shrink=0.8, extend='both')
         plt.savefig('{}\{}_contours.png'.format(folder,self.name))
-        
+        #plt.show()
+
     def save(self, folder):
         import h5py
         import numpy as np
@@ -885,10 +1062,9 @@ class wind_tunnel_test:
             'Test Scale': '1:400',
             'Test Exposure' :  self.exposure,
             'Gradient Height': self.tunnel_gradient_h,
-            'Building Height': self.building_height,
-            'Floor Height': self.building_floor_height,
-            'Building Dimensions': [42, 30],
-            'Building Stories': self.building_story,
+            'Building Height': self.building_dim[2],
+            'Building Dimensions': self.building_dim[:-1],
+
             'Wind Angle of Attack': self.angle
         }
 
@@ -901,12 +1077,15 @@ class wind_tunnel_test:
             f.create_dataset('cp_data_all',data=self.cp_data)
             
 
-            for name,data in zip(self.building_walls,self.filtered_cp_data):
+            for name,data in zip(self.building_surfaces,self.filtered_cp_data):
                 f.create_dataset('cp_data_{}'.format(name),data=np.vstack(self.filtered_cp_data[data]))
             f.create_dataset('missing_taps',data=np.array(self.tunnel_missing_taps))
-            f.create_dataset('broken_scanner', data=np.array(self.broken_scanner))
+            #f.create_dataset('broken_scanner', data=np.array(self.broken_scanner))
+            '''
             f.create_dataset('force_x',data=np.array(self.force_x))
             f.create_dataset('force_y',data=np.array(self.force_y))
             f.create_dataset('moment_z',data=np.array(self.moment_z))
             f.create_dataset('floor_elevation',data=self.floors_elev)
             f.create_dataset('area',data=np.array(self.area))
+            '''
+

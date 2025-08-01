@@ -1,18 +1,22 @@
 import os
+import warnings
 import numpy as np
 import pandas as pd
-import math
-from yaml import Loader, Dumper, load
 import pathlib
 import re
 import glob
 import h5py
 
+
 from openWLE.pressureTap import PressureTap
 from openWLE.buildingClass import Building
-from openWLE.readPSSfile import readPSSfile
-
 from openWLE.geometry import vector_rotation
+
+try:
+    from readPSSfile import readPSSfile
+except ImportError:
+    warnings.warn("readPSSfile is not included. This is a proprietary script and cannot be shared public")
+
 
 def list_tap_layout_helper(df:pd.DataFrame, tap_id:int, surface:str):
     """ Helper function for tap_layout_list"""
@@ -92,8 +96,6 @@ class ReadOpenFOAMPressure:
                 pressure = np.vstack((pressure, p))
 
         return time, pressure,  probe_locations
-    
-
     
 
     def read_pressure_directory(self, directory_path:str) -> tuple:

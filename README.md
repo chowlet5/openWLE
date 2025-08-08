@@ -6,6 +6,8 @@ This workflow presents the structural wind load evaluation analysis process for 
 Each step within the wind load evaluation pipeline is outlined along with the related background details. 
 The modular design of the framework allows for easier modification and introduction of new evaluation methodology.
 
+![Wind loading chain modules](./Images/WindLoadingChainModules.png)
+
 ## Application requirements
 The proposed workflow is developed using Python for easy readability and adoption with other workflows. The current version of the workflow has been tested using Python `3.11.9`. The required libraries are provided in the `requirement.txt` file found within the repository.
 

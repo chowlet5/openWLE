@@ -1,4 +1,4 @@
-# OpenWLE: An open-source workflow computational wind load evaluation of tall buildings
+# OpenWLE: An open-source workflow for the computational wind load evaluation of tall buildings
 
 Data and Code for the paper: [Insert Paper Link] 
 

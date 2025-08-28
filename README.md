@@ -3,7 +3,7 @@
 Data and Code for the paper: [Insert Paper Link] 
 
 This workflow presents the structural wind load evaluation analysis process for tall buildings. The framework is designed using methodology found in wind tunnel testing but is capable of being applied for computational-based wind loading studies using CFD.
-Each step within the wind load evaluation pipeline is outlined along with the related background details. 
+Each step within the wind load evaluation pipeline is outlined along with the related background details.
 The modular design of the framework allows for easier modification and introduction of new evaluation methodology.
 
 ![Wind loading chain modules](./Images/WindLoadingChainModules.png)

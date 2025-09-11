@@ -1,19 +1,11 @@
-from typing import Callable 
-
 import numpy as np
-from itertools import product
-import pandas as pd
-import time
-import math
 import itertools
-
-
 from shapely import Polygon as PolyShape
-from scipy.interpolate import griddata, interpn, SmoothBivariateSpline, bisplrep, bisplev, RBFInterpolator
+from scipy.interpolate import griddata, bisplrep, bisplev, RBFInterpolator
 
 from openWLE.geometry import plane_intersection, WLEPolygon, moment_arm_scalar
 from openWLE.pressureTap import PressureTap
-from openWLE.funcs import plot_tap_check, plot_check
+
 
 
 class Building:

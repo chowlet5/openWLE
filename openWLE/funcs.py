@@ -4,8 +4,6 @@ from scipy.stats import weibull_min
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 
-
-
 class GeneralFunctions:
 
     def spectra_value(self, spectra:np.ndarray, frequency:np.ndarray, lookup_frequency:np.ndarray|float ) -> np.ndarray:

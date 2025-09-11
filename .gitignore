@@ -2,6 +2,7 @@
 
 openWLE/readPSSfile.py
 openWLE/esduClass.py
+openWLE/readOBJ.py
 openWLE/__main__.py
 openWLE/__pycache__/
 

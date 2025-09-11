@@ -3,8 +3,6 @@ import numpy as np
 from openWLE.geometry import WLEPolygon
 
 
-
-
 def surface_bounds(mesh, facet):
     faces = mesh.faces[facet]
    
@@ -50,13 +48,3 @@ def read_geometry_file(input_file:str) -> dict:
         
             print('\n')
         
-            
-    
-        
-
-
-
-if __name__ == "__main__":
-
-    stl = "test/Test_Config/CAARC.obj"
-    read_geometry_file(stl)

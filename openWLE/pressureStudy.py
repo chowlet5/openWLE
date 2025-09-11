@@ -7,7 +7,6 @@ import re
 import glob
 import h5py
 
-
 from openWLE.pressureTap import PressureTap
 from openWLE.buildingClass import Building
 from openWLE.geometry import vector_rotation
@@ -96,6 +95,8 @@ class ReadOpenFOAMPressure:
                 pressure = np.vstack((pressure, p))
 
         return time, pressure,  probe_locations
+    
+
     
 
     def read_pressure_directory(self, directory_path:str) -> tuple:

@@ -1,19 +1,10 @@
-import sys, os
-sys.path.append('/home/chowlet5/github/Wind_Tunnel_Testing')
 import warnings
 import glob
 import numpy as np
-import pandas as pd
 import scipy.integrate as integrate
-import matplotlib.pyplot as plt
-from matplotlib import cm
 import numpy as np
-from scipy.signal import welch
-import scipy.signal as signal
 import math
-from collections.abc import Iterable
 from abc import ABC, abstractmethod
-from typing import List
 
 from openWLE.funcs import GeneralFunctions
 from openWLE.exception import InputError
@@ -1106,7 +1097,7 @@ class ChenKareem2005CQC(GeneralFunctions, CombinationRules, StructuralAnalysisFu
                 if (i == 0) and (j == 0):
                     sigma = modal_response
                 else:
-                sigma += modal_response
+                    sigma += modal_response
         return np.sqrt(sigma)
     
     def calculate_displacement_response(self) -> np.ndarray:

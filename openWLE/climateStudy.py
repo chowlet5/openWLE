@@ -1,4 +1,3 @@
-from abc import ABC, abstractmethod
 import time 
 import pandas as pd
 import numpy as np
@@ -7,7 +6,6 @@ import scipy.stats as stats
 from dateutil import rrule
 import datetime
 from geopy.distance import distance
-import matplotlib.pyplot as plt
 
 import openWLE.extreme_blue as extreme_blue
 from openWLE.exception import InputError
@@ -363,20 +361,6 @@ class ClimateStudy:
         climate_dtypes = [()]     
 
     
-
-
-
-
-
-
-# class ExtremeAnalysisTemplate(ABC):
-
-#     @abstractmethod
-#     def extreme_wind_speed_estimation(self, annual_peak_wind_speeds:np.ndarray, return_period:float = 50) -> float:
-#         pass
-
-
-
 class ExtremeWindSpeedEstimation:
 
     def __init__(self) -> None:
@@ -424,8 +408,6 @@ class ExtremeWindSpeedEstimation:
             scaled_wind_speed = [wind_speed*x/max(x) for wind_speed,x in zip(non_directional_wind_speed,directional_wind_speed.T)]
 
             directional_wind_speed = np.array(scaled_wind_speed).T
-            
-
 
         else:
             if max_reduction:
@@ -444,71 +426,3 @@ class ExtremeWindSpeedEstimation:
                 directional_wind_speed = np.array(modified_wind_speed).T
            
         return directional_wind_speed
-
-            
-            
-
-
-        
-
-            
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    config = {
-        'select_method': 'automatic',
-        'site_location': (43.65, -79.53),
-        'station_radius': 20
-    }
-
-    # config = {
-    #     'select_method': 'automatic',
-    #     'site_location': (43.65, -79.53),
-    #     'station_radius'
-    #     'stations_ids': [5097,51459],
-    #     'start_dates': ['Jan1953','May2013'],
-    #     'end_dates': ['Mar1953','Jul2013']
-    # }
-
-    # site_location = (43.65, -79.53)
-    climate = ClimateStudy(config)
-    climate.calc_station_distance()
-    climate.run_station_selection()
-    print(climate)
-    # stations = climate.get_closest_station(100)
-    # print(stations)
-    #print(climate.get_station_data())
-    #climate.get_station_list()
-    #climate.calc_station_distance()
-    #closest_station = climate.get_closest_station(10)
-
-
-    
-    # data_1 = climate.get_climate_canada_data(5097,'Jan1953', 'Jun2013')  
-    # data_2 = climate.get_climate_canada_data(51459,'Jan2013', 'Dec2022')  
-    # data_2 = climate.wind_data_processing(data_2)
-
-    # data_2 = climate.read_csv('climate_data.csv')
-
-
-    # # yearly_peaks = climate.calc_yearly_peaks(data_2)['Wind Spd (m/s)'].to_numpy()
-    # yearly_peaks = climate.calc_yearly_peaks(data_2)
-    # yearly_directional = climate.calc_yearly_peaks_directionality(data_2)
-    # yearly_directional_peaks =  yearly_directional.to_numpy()
-    # yearly_directional_peaks = yearly_directional_peaks[:,1:].T
-    # extreme_value = ExtremeWindSpeedEstimation()
-
-    # peaks = extreme_value.sector_based_wind_speed_estimation(yearly_directional_peaks,50,0.3,False,None)
-    # print(peaks)
-    # print(extreme_value.extreme_wind_speed_estimation(yearly_peaks['Wind Spd (m/s)'].to_numpy(),50)*0.7)
-    # #print(len(data_1), '_' , len(data_2))
-
-    # data = pd.concat([data_1, data_2])
-
-    #print(data[['Date/Time','Wind Spd (m/s)', 'Wind Dir']].head(5))
-    # data.to_csv('testing.csv',index = False)
-
-
-
-
-
-

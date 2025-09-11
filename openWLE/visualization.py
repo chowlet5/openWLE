@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 import matplotlib
 import numpy as np
-from scipy.interpolate import griddata, interp2d
 from dataclasses import dataclass
 
 from openWLE.exception import InputError  

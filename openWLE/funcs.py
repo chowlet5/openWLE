@@ -3,33 +3,53 @@ from scipy.signal import welch, csd
 from scipy.stats import weibull_min
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
-from enum import Enum
+
+
 
 class GeneralFunctions:
 
-    def spectra_value(self,spectra:np.ndarray, frequencies:np.ndarray, lookup_frequency:float) -> float:
-        return np.interp(lookup_frequency,frequencies,spectra)
+    def spectra_value(self, spectra:np.ndarray, frequency:np.ndarray, lookup_frequency:np.ndarray|float ) -> np.ndarray:
+        
+        if not isinstance(lookup_frequency, np.ndarray):
+            lookup_frequency = np.array([lookup_frequency])
+        if spectra.ndim == 1:
+            spectra = np.expand_dims(spectra,axis = 0)
 
-    def spectral_density(self,time_history:float,sampling_freq:float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+        return np.array(list(map(lambda sp, f: np.interp(f,frequency,sp), spectra, lookup_frequency)))
 
-        mean_value = np.mean(time_history)
-        fluctuating_time_history = time_history - mean_value
-        f, spectra = welch(fluctuating_time_history,fs=sampling_freq, nperseg = 2048, nfft=len(time_history), detrend=False)
+
+    def spectral_density(self, time_history:np.ndarray, sampling_freq:float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+
+        mean_value = np.mean(time_history,axis = -1)
+        if time_history.ndim == 1:
+            fluctuating_time_history = time_history - mean_value
+        else:
+            mean_value = np.array([mean_value]) if not isinstance(mean_value,np.ndarray) else mean_value
+            fluctuating_time_history = time_history - mean_value[:, None]
+        f, spectra = welch(fluctuating_time_history, fs=sampling_freq, nperseg = 2048, nfft=fluctuating_time_history.shape[-1], detrend=False,axis = -1)
         
         return spectra, f
     
-    def cross_spectral_density(self,time_history_1:float,time_history_2:float,sampling_freq:float) -> float:
+    def spectra_intergration(self, time_history:np.ndarray, sampling_freq:float = 1.0) -> float:
+
+        spectra, f = self.spectral_density(time_history, sampling_freq)
+        response = np.sqrt(np.trapz(spectra, f))
+
+        return response
+
+
+    def cross_spectral_density(self,time_history_1:np.ndarray, time_history_2:np.ndarray, sampling_freq:float) -> float:
         mean_value_1 = np.mean(time_history_1)
         fluctuating_time_history_1 = time_history_1 - mean_value_1
         
         mean_value_2 = np.mean(time_history_2)
         fluctuating_time_history_2 = time_history_2 - mean_value_2
 
-        f_cross,cross_spectra = csd(fluctuating_time_history_1,fluctuating_time_history_2,fs=sampling_freq,nfft=min(len(time_history_1),len(time_history_2)),detrend=False)
+        f_cross,cross_spectra = csd(fluctuating_time_history_1, fluctuating_time_history_2, fs=sampling_freq,nfft=min(len(time_history_1),len(time_history_2)),detrend=False)
 
-        return cross_spectra,f_cross
+        return cross_spectra, f_cross
     
-    def correlation_coefficient(self,time_history_1:float,time_history_2:float,sampling_freq:float) -> float:
+    def correlation_coefficient(self,time_history_1:np.ndarray, time_history_2:np.ndarray, sampling_freq:float) -> float:
         spectra_1,f_1 = self.spectral_density(time_history_1,sampling_freq)
         spectra_2,f_2 = self.spectral_density(time_history_2,sampling_freq)
         cross_spectra,f_cross = self.cross_spectral_density(time_history_1,time_history_2,sampling_freq)
@@ -101,7 +121,7 @@ class InputFileNaming:
         
     def index_extraction_setup(self):
         
-        index_list = self.find_text_group(self.sample_regex)
+        index_list = self.find_text_group(self.sample_regex) 
         
         if len(index_list) != len(self.naming_order):
             raise ValueError('The number of indexes in the sample regex does not match the number of indexes in the naming dictionary')

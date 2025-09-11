@@ -19,6 +19,7 @@ from openWLE.funcs import GeneralFunctions
 from openWLE.exception import InputError
 from openWLE.buildingClass import Building, BuildingFloor
 from openWLE.extreme_blue import extreme_blue
+
 # Common Functions
 
 def displacement_participation_factor(mode_shape:np.ndarray) -> float:
@@ -49,9 +50,39 @@ def mechanical_admittance(natural_frequency:float, damping_ratio:float, frequenc
     return 1/((1 - np.power(frequency/natural_frequency,2))**2+ (4*damping_ratio**2)*(frequency/natural_frequency)**2)
 
 
+class StructuralAnalysisFunctions:
+
+
+    def displacement_participation_factor(self) -> np.ndarray:
+        return self.mode_shapes
+    
+    def acceleration_participation_factor(self) -> np.ndarray:
+
+        return self.mode_shapes * (self.natural_circular_frequency**2)[:, None, None]
+    
+    def complex_freq_response_amplitude(self,natfreq:float|np.ndarray, f:np.ndarray) -> np.ndarray:
+        beta = f/natfreq[:,None]
+        denominator = np.power(1 - np.power(beta,2),2) + np.power(self.damping_ratio[:,None] * beta * 2,2)
+        denominator = np.power((self.gen_mass[:,None]*natfreq[:,None]**2),2)*denominator
+        return 1/denominator 
+    
+    def mean_response(self, particiation_factor:np.ndarray) -> np.ndarray:
+        return np.sum(np.moveaxis(particiation_factor,0,-1) * np.mean(self.gen_force,axis=1)/self.gen_stiffness,axis = -1)
+
+    def calc_gust_factor(self,mean_zero_upcrossing_rate:np.ndarray|float, time_period:float) -> np.ndarray|float:
+        
+        sqrt_root = np.sqrt(2*np.log(mean_zero_upcrossing_rate*time_period))
+        gust_factor = sqrt_root + 0.5772/sqrt_root
+        return gust_factor
+
+    def calc_mean_zero_upcrossing_rate(self, response_spectra:np.ndarray, f:np.ndarray) -> float:
+        
+        numerator = np.trapz(np.multiply(response_spectra,np.power(f,2)),f)
+        denominator = np.trapz(response_spectra,f)
+        return np.sqrt(numerator/denominator)
+
 
 class StructuralStudy:
-    
 
     def __init__(self, config:dict, building:Building = None) -> None:
 
@@ -78,8 +109,6 @@ class StructuralStudy:
 
         structural_properties_dir  = config['structural_properties_directory']
         properties_delimiter = config['delimiter']
-
-        
 
         self.mass_height = self.import_data(structural_properties_dir,properties_delimiter,'mass_height')
         self.mass_distribution = self.import_data(structural_properties_dir,properties_delimiter,'mass_distribution')      
@@ -203,23 +232,23 @@ class StructuralStudy:
             case _:
                 pass
 
-    def process_time_domain(self, time_domain_config:dict) -> None:
+    def process_time_domain(self, config:dict) -> None:
         
         mode_shapes = self.mode_shapes
         self.building.displacement_time_history = self.time_analysis.displacement_response(mode_shapes)
         circular_frequencies = self.lumped_mass_system.mode_circular_frequency
         self.building.acceleration_time_history = self.time_analysis.acceleration_response(mode_shapes,circular_frequencies)
         self.building.structural_analysis_time_step = self.time_analysis.time_step
-        if time_domain_config.__contains__('results'):
+        if config.__contains__('results'):
             self.structural_results = {}
-            for result in time_domain_config['results']:
+            for result in config['results']:
                 key = list(result.keys())[0]
                 items = list(result.values())[0]
                 match key.lower():
                     case 'displacement':
                         if items['mean_value']:
                             value = self.time_analysis.get_displacement_data(mode_shapes,'mean')
-                            self.structural_results['displacement_mean'] =value
+                            self.structural_results['displacement_mean'] = value
                         if items['std_value']:
                             value = self.time_analysis.get_displacement_data(mode_shapes,'std')
                             self.structural_results['displacement_std'] = value
@@ -239,13 +268,32 @@ class StructuralStudy:
                                     raise InputError(f'peak_type = {peak_type}', 'peak_type must be one of the following options: max, min, abs')
                             self.structural_results['displacement_peak'] = value
                         
+                    case 'acceleration':
+                        if items['std_value']:
+                            value = self.time_analysis.get_acceleration_data(mode_shapes, circular_frequencies, 'std')
+                            self.structural_results['acceleration_std'] = value
+                        if items['peak_value']:
+                            if not items.__contains__('MRI'):
+                                raise InputError('items.__contains__(\'MRI\')', 'Missing MRI value for peak analysis')
+                            peak_type = items['peak_type'] if items.__contains__('peak_type') else 'abs'
+                            non_probability = 1 - 1/items['MRI']
+                            match peak_type.lower():
+                                case 'max':
+                                    value = self.time_analysis.get_acceleration_data(mode_shapes, circular_frequencies,'peak_max',non_probability)
+                                case 'min':
+                                    value = self.time_analysis.get_acceleration_data(mode_shapes, circular_frequencies, 'peak_min',non_probability)
+                                case 'abs':
+                                    value = self.time_analysis.get_acceleration_data(mode_shapes, circular_frequencies, 'peak_abs',non_probability)
+                                case _:
+                                    raise InputError(f'peak_type = {peak_type}', 'peak_type must be one of the following options: max, min, abs')
+                            self.structural_results['acceleration_peak'] = value
 
             
     def run_time_domain(self, time_domain_config:dict) -> None:
 
         gen_mass = self.lumped_mass_system.gen_mass
         gen_stiffness = self.lumped_mass_system.gen_stiffness
-        gen_force = self.lumped_mass_system.gen_force()
+        gen_force = self.lumped_mass_system.gen_force
         if time_domain_config.__contains__('starting_index'):
             starting_index = time_domain_config['starting_index']
             gen_force = gen_force[:,starting_index:]
@@ -262,25 +310,85 @@ class StructuralStudy:
         self.q = q
         self.dot_q = dot_q
         self.ddot_q = ddot_q
-
         
         self.process_time_domain(time_domain_config)
 
-
-         
-
+    def process_frequency_analysis(self, config:dict):
+        
+        combination_method = config['combination_method']
+        if config.__contains__('results'):
+            self.structural_results = {}
+            for result in config['results']:
+                key = list(result.keys())[0]
+                items = list(result.values())[0]
+                match key.lower():
+                    case 'displacement':
+                        if items['response_value']:
+                            mean_value, sigma = self.frequency_analysis.calc_response('displacement',combination_method)
+                            self.structural_results['displacement_mean'] = mean_value
+                            self.structural_results['displacement_std'] = sigma
+                        if items['peak_analysis']:
+                            parameter = {}
+                            if items.__contains__('gust_factor'):
+                                parameter['background_gust_factor'] = items['gust_factor']
+                            if items.__contains__('background_gust_factor'):
+                                parameter['background_gust_factor'] = items['background_gust_factor'] 
+                            if items.__contains__('resonant_gust_factor'):
+                                parameter['resonant_gust_factor'] = items['resonant_gust_factor'] 
+                            if items.__contains__('peak_duration'):
+                                parameter['peak_duration'] = items['peak_duration']
+                            postitive_peak, negative_peak = self.frequency_analysis.calc_peak_response('displacement', combination_method, **parameter)
+                            peak_type = items['peak_type'] if items.__contains__('peak_type') else 'peak_abs'
+                            match peak_type:
+                                case 'peak_positive':
+                                    self.structural_results['displacement_positive_peak'] = postitive_peak
+                                case 'peak_negative':
+                                    self.structural_results['displacement_negative_peak'] = negative_peak
+                                case 'peak_abs':
+                                    self.structural_results['displacement_abs_peak'] = np.where(np.abs(postitive_peak) >= np.abs(negative_peak), postitive_peak, negative_peak)
+                            
+                    case 'acceleration':
+                        if items['response_value']:
+                            _, sigma = self.frequency_analysis.calc_response('acceleration',combination_method)
+                            self.structural_results['acceleration_std'] = sigma
+                        if items['peak_analysis']:
+                            parameter = {}
+                            if items.__contains__('gust_factor'):
+                                parameter['background_gust_factor'] = items['gust_factor']
+                            if items.__contains__('background_gust_factor'):
+                                parameter['background_gust_factor'] = items['background_gust_factor'] 
+                            if items.__contains__('resonant_gust_factor'):
+                                parameter['resonant_gust_factor'] = items['resonant_gust_factor'] 
+                            if items.__contains__('peak_duration'):
+                                parameter['peak_duration'] = items['peak_duration']
+                            postitive_peak , negative_peak = self.frequency_analysis.calc_peak_response('acceleration', combination_method, **parameter)
+                            
+                            peak_type = items['peak_type'] if items.__contains__('peak_type') else 'peak_abs'
+                            match peak_type:
+                                case 'peak_positive':
+                                    self.structural_results['acceleration_positive_peak'] = postitive_peak
+                                case 'peak_negative':
+                                    self.structural_results['acceleration_negative_peak'] = negative_peak
+                                case 'peak_abs':
+                                    self.structural_results['acceleration_abs_peak'] = np.where(np.abs(postitive_peak) >= np.abs(negative_peak), postitive_peak, negative_peak)
+                            
+        print(self.structural_results)
     def run_frequency_domain(self, frequency_domain_config:dict) -> None:
         
         gen_mass = self.lumped_mass_system.gen_mass
         gen_stiffness = self.lumped_mass_system.gen_stiffness
+        natural_frequency = self.lumped_mass_system.mode_circular_frequency
+        damping_ratio = self.lumped_mass_system.damping_ratio
+        mode_shapes = self.mode_shapes
+        self.frequency_analysis = FrequencyDomainAnalysis(gen_mass,damping_ratio,gen_stiffness,
+                                                   mode_shapes,natural_frequency)
+
         gen_force = self.lumped_mass_system.gen_force
-        damping_ratio = self.lumped_mass_system.mode_damping
-        mode_shapes = self.directional_mode_shapes
-        frequency_domain = FrequencyDomainAnalysis(gen_mass,damping_ratio,gen_stiffness,
-                                                   mode_shapes,gen_force)
+        sampling_frequency = self.building.force_sampling_frequency
+        self.frequency_analysis.set_generalized_force(gen_force,sampling_frequency)
 
-
-        self.frequency_analysis
+        self.process_frequency_analysis(frequency_domain_config)
+        
 
     def run_analysis(self) -> None:
 
@@ -289,7 +397,7 @@ class StructuralStudy:
                 self.run_time_domain(self.config['time_domain_analysis'])
                 
             case 'frequency_domain':
-                pass
+                self.run_frequency_domain(self.config['frequency_domain_analysis'])
 
     @property
     def displacement_time_history(self,direction:str = None) -> np.ndarray:
@@ -428,11 +536,17 @@ class StructuralStudy:
         for direction in range(self.building.acceleration_time_history.shape[1]):
             HDF5_group.create_dataset(f'Acceleration_{direction}',data = self.building.acceleration_time_history[:,direction,:])
         
-
         for key in self.structural_results:
 
             HDF5_group.create_dataset(key,data = self.structural_results[key])
 
+    def save_frequency_domain_analysis(self, HDF5_group:object):
+        
+        HDF5_group.attrs['combination_method'] = self.frequency_analysis.combination_obj()
+
+        for key in self.structural_results:
+
+            HDF5_group.create_dataset(key,data = self.structural_results[key])
 
     def save_structural_analysis(self,HDF5_file:object):
         
@@ -459,10 +573,14 @@ class LumpedMass(GeneralFunctions):
     mass_distribution: list of the mass distribution(percentage of total mass) of the structure
     moment_inertia: float value of the polar moment of inertia of the structure
     """
-    def __init__(self,mass_height:list, mass_distribution:list, mode_shapes: np.ndarray|str,mode_frequency:np.ndarray, damping_ratio: np.ndarray) -> None:
+    def __init__(self,mass_height:list,
+                 mass_distribution:list,
+                 mode_shapes: np.ndarray|str,
+                 mode_frequency:np.ndarray,
+                 damping_ratio: np.ndarray) -> None:
         
         self.__directions = ['X','Y','Theta']
-
+        self.__gen_force = None
         self.mass_height = np.sort(np.array(mass_height))
         self.mass_distribution = mass_distribution
         self.base_moments = {}
@@ -596,20 +714,25 @@ class LumpedMass(GeneralFunctions):
             mass_forces = np.array(mass_forces)
             self.mass_forces = mass_forces
     
+    @property
     def gen_force(self) -> np.ndarray:
 
-        return self.cal_gen_force(self.mass_forces)
+        if self.__gen_force == None:
+            self.__gen_force =  self.cal_gen_force(self.mass_forces)
+        return self.__gen_force
+
+    @gen_force.setter
+    def gen_force(self, value):
+        self.__gen_force = np.array(value)
 
     def cal_gen_force(self,forces:np.ndarray,) -> np.ndarray: 
         gen_force = []    
-        
         
         mode_shape = self.mode_shapes
         for mode_index in range(mode_shape.shape[0]):
             mode = mode_shape[mode_index]
             temp = []
             for floor in range(mode.shape[0]):
-                hold = np.sum(mode[floor] * forces[floor].T,axis = 1)
                 temp.append(np.sum(mode[floor] * forces[floor].T,axis=1))
             gen_force.append(np.sum(temp,axis=0))
             
@@ -617,7 +740,7 @@ class LumpedMass(GeneralFunctions):
             
     def cal_gen_mass(self, mass:np.ndarray, mode_shape:np.ndarray) -> np.ndarray:
         
-        return np.sum(np.multiply(mass,np.power(mode_shape,2)))
+        return np.sum(np.multiply(mass[:,None],np.power(mode_shape,2)))
     
     def cal_gen_stiffness(self,gen_mass:np.ndarray, mode_circular_frequency:np.ndarray) -> np.ndarray:
 
@@ -646,7 +769,6 @@ class LumpedMass(GeneralFunctions):
         for index, mode in enumerate(self.mode_shapes):
             
             dset = mode_group.create_dataset(f'Mode_{index}', data = mode)
-            
 
         # Store generalized data
         subgroup = dgroup.create_group('Generalized_data')
@@ -658,44 +780,24 @@ class LumpedMass(GeneralFunctions):
         dset.attrs['Description'] = 'Computed generalized stiffness associated with each mode' 
 
     
-class FrequencyDomainAnalysis():
+class FrequencyDomainAnalysis(GeneralFunctions, StructuralAnalysisFunctions):
 
     def __init__(self,
                  gen_mass:np.ndarray,
                  damping_ratio:np.ndarray,
                  gen_stiffness:np.ndarray, 
                  mode_shapes:np.ndarray,
-                 natural_frequency:np.ndarray,
-                 sampling_frequency:float) -> None:
+                 natural_frequency:np.ndarray) -> None:
         
         self.gen_mass = gen_mass
         self.damping_ratio = damping_ratio
         self.gen_stiffness = gen_stiffness
         self.mode_shapes = mode_shapes
         self.natural_frequency = natural_frequency
+
+    def set_generalized_force(self, gen_force:np.ndarray, sampling_frequency:float) -> None:
+        self.gen_force = gen_force
         self.sampling_frequency = sampling_frequency
-
-        self.gen_force = None
-
-
-    def calc_gust_factor(self,mean_zero_upcrossing_rate:float, time_period:float) -> float:
-        
-        sqrt_root = math.sqrt(2*mean_zero_upcrossing_rate*time_period)
-        gust_factor = sqrt_root + 0.5772/sqrt_root
-        return gust_factor
-
-    def calc_mean_zero_upcrossing_rate(self, response_spectra:np.ndarray, f:np.ndarray) -> float:
-
-        numerator = np.trapz(np.multiply(response_spectra,np.power(f,2)),f)
-        denominator = np.trapz(response_spectra,f)
-        return np.sqrt(numerator/denominator)
-        
-    def complex_freq_response_amplitude(self,natfreq,f):
-        
-        denominator = np.power((1 - np.power(f,2)/natfreq**2),2) + 4*(self.gen_damping**2)*(np.power(f,2)/natfreq**2)
-        denominator = (self.gen_mass*natfreq**2)*np.sqrt(denominator)
-
-        return 1/denominator 
     
     def set_modal_combination(self,combination_method:str) -> None:
         
@@ -710,25 +812,32 @@ class FrequencyDomainAnalysis():
 
         if combination_method.upper() == 'SRSS':
             self.combination_obj = SRSS(**params)
-        elif combination_method.upper() == 'CHENKAREEM2005CQC':
+        elif combination_method.upper() == 'CQC':
             self.combination_obj = ChenKareem2005CQC(**params)
-        elif combination_method.upper() == 'HUANG2009CQC':
-            self.combination_obj = HuangEtAl2009CQC(**params)
 
-    def calc_peak_displacement(self, generalized_force:np.ndarray, sampling_frequency:float, combination_method:str = 'SRSS',
-                           background_gust_factor:float = 3.5, resonant_gust_factors = 3.5) -> np.ndarray:
+    def calc_response(self, response_type:str = 'displacement',
+                           combination_method:str = 'SRSS') -> np.ndarray:
         
-        if combination_method not in ['SRSS','ChenKareem2005CQC','Huang2009CQC']:
+        if combination_method not in ['SRSS','CQC']:
             raise ValueError('Invalid combination method. Expected values are "SRSS" or "CQC"')
         else:
             self.set_modal_combination(combination_method)
 
-        self.gen_force = generalized_force
+        return self.combination_obj.get_response(response_type)
+    
+    def calc_peak_response(self, response_type:str = 'displacement',
+                           combination_method:str = 'SRSS',
+                           background_gust_factor:float = 3.5,
+                           resonant_gust_factor:np.ndarray = None,
+                           peak_duration:float = 3600) -> np.ndarray:
+        
+        if combination_method not in ['SRSS','CQC']:
+            raise ValueError('Invalid combination method. Expected values are "SRSS" or "CQC"')
+        else:
+            self.set_modal_combination(combination_method)
 
-        mean_displacement = self.combination_obj.mean_response(self.combination_obj.displacement_participation_factor)
-        sigma = self.combination_obj.calc_displacement_response()
-
-        return mean_displacement + background_gust_factor*sigma
+        return self.combination_obj.get_peak_response(response_type,background_gust_factor, resonant_gust_factor, peak_duration)
+           
 
 ########################################################################################################################
 # Modal Combination Rules
@@ -736,15 +845,66 @@ class FrequencyDomainAnalysis():
 
 class CombinationRules(ABC):
 
+    __name__ = None
+    
+    
+    def __call__(self):
+        return self.__name__
+
+    @property
+    def name(self):
+        return self.__name__
+    
+    @name.setter
+    def name(self, value):
+        self.__name__ = value
+    
+
+    def get_response(self,response_type:str) -> np.ndarray:
+        match response_type.lower():
+            case 'displacement':
+                mean_value, sigma = self.calculate_displacement_response()
+            case 'acceleration':
+                mean_value, sigma = self.calculate_acceleration_response()
+        return mean_value, sigma
+    
+    def get_peak_response(self,response_type:str,
+                          background_gust_factor:float = 3.5,
+                          resonant_gust: np.ndarray = None,
+                          peak_duration:float = 3600) -> np.ndarray:
+        parameters = {
+            'peak_factor': background_gust_factor,
+            'background_gust_factor':background_gust_factor,
+            'resonant_gust': resonant_gust,
+            'peak_duration':peak_duration
+        }
+        match response_type.lower():
+            case 'displacement':
+                mean_value, sigma = self.calculate_peak_displacement(**parameters)
+            case 'acceleration':
+                mean_value, sigma = self.calculate_peak_acceleration(**parameters)
+                
+        return mean_value, sigma
+
     @abstractmethod
-    def calc_displacement_response():
+    def calculate_displacement_response():
         pass
 
     @abstractmethod
-    def calc_acceleration_response():
+    def calculate_acceleration_response():
         pass  
 
-class SRSS(GeneralFunctions,CombinationRules):
+    @abstractmethod
+    def calculate_peak_displacement():
+        pass
+
+    @abstractmethod
+    def calculate_peak_acceleration():
+        pass  
+
+    
+class SRSS(GeneralFunctions, CombinationRules, StructuralAnalysisFunctions):
+
 
     def __init__(self, 
                  gen_mass: np.ndarray, 
@@ -755,6 +915,7 @@ class SRSS(GeneralFunctions,CombinationRules):
                  natural_circular_frequency:np.ndarray, 
                  sampling_frequency:float):
         
+        self.name = 'SRSS'
         self.mode_shapes = mode_shapes
         self.natural_circular_frequency = natural_circular_frequency
         self.damping_ratio = damping_ratio
@@ -763,44 +924,68 @@ class SRSS(GeneralFunctions,CombinationRules):
         self.sampling_frequency = sampling_frequency
         self.gen_force = gen_force
    
-    def mean_response(self, particiation_factor:list) -> float:
+
+    def calc_structural_response_deviation(self) -> np.ndarray:
+        spectra, f = self.spectral_density(self.gen_force,self.sampling_frequency)
+        mechanical_admittance = self.complex_freq_response_amplitude(self.natural_circular_frequency,f)
+        response_var = integrate.trapezoid(mechanical_admittance * spectra, f)
+        self.structural_response = np.sqrt(response_var)
+        return self.structural_response
+
+    def calculate_response(self, participation_factor) -> np.ndarray:
+
+        sigma = self.calc_structural_response_deviation()
+        return np.sqrt(np.sum((np.moveaxis(participation_factor,0,-1)**2) * sigma ** 2 , axis= -1))
+
+    def calculate_displacement_response(self,) -> np.ndarray:
+
+        participation_factor = self.displacement_participation_factor()
+        mean_value = self.mean_response(participation_factor)
+        sigma = self.calculate_response(participation_factor)
+        return mean_value, sigma
+
+    def calculate_acceleration_response(self) -> np.ndarray:
+
+        participation_factor = self.acceleration_participation_factor()
+        sigma = self.calculate_response(participation_factor)
+        mean_value = np.zeros_like(sigma)
+        return  mean_value, sigma 
+
+    def calculate_upcrossing_rate(self) -> float:
+        spectra, f = self.spectral_density(self.gen_force,self.sampling_frequency)
+        mechanical_admittance = self.complex_freq_response_amplitude(self.natural_circular_frequency,f)
+        response_spectra =  mechanical_admittance * spectra 
+
+        numerator = np.nansum(np.trapz(np.multiply(response_spectra, np.power(f,2))))
+        denominator = np.nansum(np.trapz(response_spectra,f))
+        return np.sqrt(numerator/denominator)
+    
+    def calculate_peak_response(self, participation_factor:np.ndarray, peak_factor:float = None, peak_duration:float = 3600) -> np.ndarray:
         
-        return np.sum(particiation_factor*(np.mean(self.gen_force,axis=1)/self.gen_stiffness))
+        mean_value = self.mean_response(participation_factor)
+        response = self.calculate_response(participation_factor)
 
-    def background_response(self, mode:int) -> float:
-        spectra,f = self.spectral_density(self.gen_force[mode],self.sampling_frequency)
-        variance = np.trapz(spectra,f)/self.gen_stiffness[mode]**2
-        return math.sqrt(variance)
-    
-    def resonant_response(self, mode:int) -> float:
-        spectra,f = self.spectral_density(self.gen_force[mode],self.sampling_frequency)
-        spectra_value = self.spectra_value(spectra,f,self.natural_circular_frequency[mode])
-        resonant_variance = spectra_value*self.natural_circular_frequency[mode]*(np.pi/4*self.damping_ratio[mode])*(1/self.gen_stiffness[mode]**2)
-        return math.sqrt(resonant_variance)
-    
-    def response_sigma(self, mode:int) -> float:
-        background = self.background_response(mode)
-        resonant = self.resonant_response(mode)
-        return math.sqrt(background**2 + resonant**2)
+        if peak_factor == None:
+            upcrossing_rate = self.calculate_upcrossing_rate()
+            peak_factor = self.calc_gust_factor(upcrossing_rate, peak_duration)
 
-    def calc_response(self, particiation_factor:list)-> float:
+        positive_peak = mean_value + peak_factor * response
+        negative_peak = mean_value - peak_factor * response
 
-        sigma = 0
-        for i in range(len(self.gen_force)):
-            sigma += (self.response_sigma(i)*particiation_factor[i])**2
+        return positive_peak, negative_peak
 
-        return np.sqrt(sigma)
-
-    def calc_displacement_response(self,participation_factor:np.ndarray) -> float:
+    def calculate_peak_displacement(self, peak_factor:float, peak_duration:float = 3600, **kwargs) -> np.ndarray:
         
-        return self.calc_response(participation_factor)
+        participation_factor = self.displacement_participation_factor()
+        return self.calculate_peak_response(participation_factor, peak_factor, peak_duration)
 
-    def calc_acceleration_response(self,participation_factor:np.ndarray) -> float:
-        return self.calc_response(participation_factor)
+    def calculate_peak_acceleration(self, peak_factor:float, peak_duration:float = 3600, **kwargs) -> np.ndarray:
 
+        participation_factor = self.acceleration_participation_factor()
+        return self.calculate_peak_response(participation_factor, peak_factor, peak_duration)
     
 
-class ChenKareem2005CQC(GeneralFunctions,CombinationRules):
+class ChenKareem2005CQC(GeneralFunctions, CombinationRules, StructuralAnalysisFunctions):
 
     def __init__(self, 
                  gen_mass: np.ndarray, 
@@ -811,6 +996,7 @@ class ChenKareem2005CQC(GeneralFunctions,CombinationRules):
                  natural_circular_frequency:np.ndarray, 
                  sampling_frequency:float) -> None:
         
+        self.name = 'CQC'
         self.mode_shapes = mode_shapes
         self.natural_circular_frequency = natural_circular_frequency
         self.damping_ratio = damping_ratio
@@ -820,24 +1006,36 @@ class ChenKareem2005CQC(GeneralFunctions,CombinationRules):
         self.gen_force = gen_force
            
 
-    def mean_response(self,particiation_factor:np.ndarray) -> float:
-        return np.sum(particiation_factor.T*np.mean(self.gen_force,axis=1)/self.gen_stiffness)
-
     def gen_force_std(self, index:int) -> float:
         return self.background_force(self.gen_force[index])
     
-    def background_displacement_rms(self, mode:int ) -> float:
-        spectra,frequencies = self.spectral_density(self.gen_force[mode],self.sampling_frequency)
-        variance = np.trapz(spectra,frequencies)/self.gen_stiffness[mode]**2
-        return math.sqrt(variance) 
-
+    def background_response_variance(self) -> np.ndarray:
+        spectra,frequencies = self.spectral_density(self.gen_force,self.sampling_frequency)
+        variance = np.trapz(spectra,frequencies)/(self.gen_stiffness**2)
+        return variance
     
-    def resonant_displacement_rms(self, mode:int) -> float:
+    def resonant_response_variance(self) -> np.ndarray:
             
-        spectra,frequencies = self.spectral_density(self.gen_force[mode],self.sampling_frequency)
-        spectra_value = self.spectra_value(spectra,frequencies,self.natural_circular_frequency[mode])
-        resonant_variance = spectra_value*self.natural_circular_frequency[mode]*(np.pi/4*self.damping_ratio[mode])*(1/self.gen_stiffness[mode]**2)
-        return math.sqrt(resonant_variance)
+        spectra,frequency = self.spectral_density(self.gen_force,self.sampling_frequency)
+        spectra_value = self.spectra_value(spectra,frequency,self.natural_circular_frequency)
+        resonant_variance = spectra_value*self.natural_circular_frequency*(np.pi/4*self.damping_ratio)*(1/(self.gen_stiffness**2))
+        return resonant_variance
+    
+    def background_cross_correlation(self,mode_i_index:int, mode_j_index:int) -> float:
+
+        gen_force_i = self.gen_force[mode_i_index]
+        gen_force_j = self.gen_force[mode_j_index]
+        sampling_freq = self.sampling_frequency
+
+        response_i = self.spectra_intergration(gen_force_i, sampling_freq)
+        response_j = self.spectra_intergration(gen_force_j, sampling_freq)
+
+        cross_spectra, f_cross = self.cross_spectral_density(gen_force_i,gen_force_j, sampling_freq)
+
+        variance_i_j = integrate.trapezoid(np.real(cross_spectra),f_cross)
+
+        return variance_i_j/(response_i*response_j)
+
     
     def der_kiureghian_correlation_parameter(self,mode_i_index:int,mode_j_index:int):
         if (not isinstance(mode_i_index,int)) or (not isinstance(mode_j_index,int)):
@@ -870,52 +1068,139 @@ class ChenKareem2005CQC(GeneralFunctions,CombinationRules):
 
         return cross_spectra_value/np.sqrt(spectra_value_i*spectra_value_j)
 
-    def calc_response(self, participation_factor:list) -> float:
+
+    def calc_response(self, participation_factor:np.ndarray) -> float:
         
-        sigma = 0
+        background_response = self.background_response_variance()
+        resonant_response = self.resonant_response_variance()
+        combined_response = np.sqrt(background_response + resonant_response)
+        
         for i in range(len(self.gen_force)):
             for j in range(len(self.gen_force)):
                 
                 if i == j:
-                    background_response = self.background_displacement_rms(i)
-                    resonant_response = self.resonant_displacement_rms(i)
-                    temp_response = np.sqrt(background_response**2 + resonant_response**2)
-                    modal_response = (temp_response**2)*participation_factor[i]**2
+                    
+                    modal_response = (combined_response[i]**2)*participation_factor[i]**2
+                
                 else:
+
+                    background_correlation_i_j = self.background_cross_correlation(i,j)
+                    
                     alpha = self.alpha_i_j(i,j)
                     der_kiureghian = self.der_kiureghian_correlation_parameter(i,j)
 
-                    background_response_i = self.background_displacement_rms(i)
-                    resonant_response_i = self.resonant_displacement_rms(i)
-                    modal_response_i = math.sqrt(background_response_i**2 + resonant_response_i**2)
-                    modal_response_i *= participation_factor[i]
+                    resonant_correlation_i_j = alpha * der_kiureghian
 
-                    background_response_j = self.background_displacement_rms(j)
-                    resonant_response_j = self.resonant_displacement_rms(j)
-                    modal_response_j = math.sqrt(background_response_j**2 + resonant_response_j**2)
-                    modal_response_j *= participation_factor[j]
-                    modal_response = modal_response_i*modal_response_j*(alpha * der_kiureghian)
-            
+                    background_response_i = math.sqrt(background_response[i])
+                    resonant_response_i = math.sqrt(resonant_response[i])
+                    
+                    background_response_j = math.sqrt(background_response[j])
+                    resonant_response_j = math.sqrt(resonant_response[j])
+
+                    correlation_i_j = background_correlation_i_j * background_response_i * background_response_j
+                    correlation_i_j += resonant_correlation_i_j * resonant_response_i * resonant_response_j
+                    correlation_i_j /= combined_response[i] * combined_response[j]
+
+                    modal_response = participation_factor[i] * participation_factor[j] * correlation_i_j * combined_response[i] * combined_response[j]
+
+                if (i == 0) and (j == 0):
+                    sigma = modal_response
+                else:
                 sigma += modal_response
         return np.sqrt(sigma)
     
-    def calc_displacement_response(self,participation_factor:np.ndarray) -> np.ndarray:
+    def calculate_displacement_response(self) -> np.ndarray:
+        participation_factor = self.displacement_participation_factor()
+        mean_value = self.mean_response(participation_factor)
+        sigma = self.calc_response(participation_factor)
+        return mean_value, sigma
 
-        return self.calc_response(participation_factor)
+    def calculate_acceleration_response(self) -> np.ndarray:
+        participation_factor = self.acceleration_participation_factor()
+        mean_value = 0
+        sigma = self.calc_response(participation_factor)
+        return mean_value, sigma
 
-
-    def calc_acceleration_response(self,participation_factor:np.ndarray) -> np.ndarray:
-
-        return self.calc_response(participation_factor)
-    
-    def calc_displacement_peak(self, gust_factor:float = 3.5) -> float:
-        mean_value = self.mean_displacement_response
-        sigma = self.calc_displacement_response()
-
-        return mean_value + gust_factor*sigma
+    def calc_peak_response(self, participation_factor:np.ndarray, 
+                           background_gust_factor:float = 3.5,
+                           resonant_gust_factor: np.ndarray = None,
+                           peak_duration:float = 3600, ) -> np.ndarray:
         
-class HuangEtAl2009CQC(GeneralFunctions,CombinationRules):
+        background_response = self.background_response_variance()
+        resonant_response = self.resonant_response_variance()
+        
+        if background_gust_factor == None:
+            upcrossing_rate = self.calculate_upcrossing_rate()
+            background_gust_factor = self.calc_gust_factor(upcrossing_rate, peak_duration)
 
+        if isinstance(resonant_gust_factor, float|int):
+            resonant_gust_factor = np.ones_like(self.natural_circular_frequency) * resonant_gust_factor
+        
+        if resonant_gust_factor == None:
+            resonant_gust_factor = self.calc_gust_factor(self.natural_circular_frequency, peak_duration)
+
+        
+        for i in range(len(self.gen_force)):
+            for j in range(len(self.gen_force)):
+                
+                if i == j:
+                    
+                    modal_response = (background_gust_factor ** 2) * background_response[i]
+                    modal_response += (resonant_gust_factor[i] ** 2) * resonant_response[i]
+                    modal_response *= participation_factor[i]**2
+                
+                else:
+
+                    background_correlation_i_j = self.background_cross_correlation(i,j)
+                    alpha = self.alpha_i_j(i,j)
+                    der_kiureghian = self.der_kiureghian_correlation_parameter(i,j)
+
+                    resonant_correlation_i_j = alpha * der_kiureghian
+
+                    background_response_i = math.sqrt(background_response[i])
+                    resonant_response_i = math.sqrt(resonant_response[i])
+                    
+                    background_response_j = math.sqrt(background_response[j])
+                    resonant_response_j = math.sqrt(resonant_response[j])
+
+                    response_i_j = background_gust_factor * background_correlation_i_j * background_response_i * background_response_j
+                    response_i_j += resonant_gust_factor[i] * resonant_gust_factor[j] * resonant_correlation_i_j * resonant_response_i * resonant_response_j
+                    
+                    modal_response = participation_factor[i] * participation_factor[j] * response_i_j 
+
+                if (i == 0) and (j == 0):
+                    sigma = modal_response
+                else:
+                    sigma += modal_response
+
+        return np.sqrt(sigma)
+    
+    def calculate_peak_displacement(self,background_gust_factor:float = 3.5,
+                           resonant_gust_factor: np.ndarray = None,
+                           peak_duration:float = 3600, **kwargs) -> float:
+        participation_factor = self.displacement_participation_factor()
+        mean_value = self.mean_response(participation_factor)
+        sigma = self.calc_peak_response(participation_factor,background_gust_factor,resonant_gust_factor, peak_duration)
+
+        positive_peak = mean_value + sigma
+        negative_peak = mean_value - sigma
+
+        return positive_peak, negative_peak
+    
+    def calculate_peak_acceleration(self,background_gust_factor:float = 3.5,
+                           resonant_gust_factor: np.ndarray = None,
+                           peak_duration:float = 3600, **kwargs) -> float:
+        participation_factor = self.acceleration_participation_factor()
+        mean_value = 0
+        sigma = self.calc_peak_response(participation_factor,background_gust_factor,resonant_gust_factor, peak_duration)
+
+        positive_peak = mean_value + sigma
+        negative_peak = mean_value - sigma
+
+        return positive_peak, negative_peak
+        
+class HuangEtAl2009CQC(GeneralFunctions):
+    #TODO To be implemented
     def __init__(self):
         self.mode_shapes = None
         self.natural_frequency = None
@@ -1202,32 +1487,22 @@ class TimeDomainAnalysis:
         match method.lower():
 
             case 'max':
-                return np.max(acceleration,axis = 1)
+                return np.max(acceleration,axis = 2)
             case 'min':
-                return np.min(acceleration,axis = 1)
+                return np.min(acceleration,axis = 2)
             case 'std':
-                return np.std(acceleration,axis = 1)
-            case 'peak':
-                if probablity_non_exceedence is None:
-                    raise ValueError('A probab value must be provided for peak calculation')
+                return np.std(acceleration,axis = 2)
+            case 'peak_max':
+                return self.get_peak_values(acceleration, probablity_non_exceedence, max_peak = True)
+            case 'peak_min':
+                return self.get_peak_values(acceleration, probablity_non_exceedence, max_peak = False)
+            case 'peak_abs':
+                max_value = self.get_peak_values(acceleration, probablity_non_exceedence, max_peak = True)
+                min_value = self.get_peak_values(acceleration, probablity_non_exceedence, max_peak = False)
 
-                if isinstance(probablity_non_exceedence, (int, float)):
-                    probablity_non_exceedence = [probablity_non_exceedence]
-                epoches = 10
-                peaks = []
-                for floor in range(len(acceleration)):
-                    floor_peak = []
-                    for direction in range(len(acceleration[floor])):
-                        
-                        temp_disp = acceleration[floor][direction]
- 
-                        duration = int(len(temp_disp) - math.remainder(len(temp_disp),epoches))
-                        segments = np.array_split(temp_disp[:duration],epoches)
-                        annual_maxima = np.max(segments,axis=1)
-                        peak_value, _, _ = extreme_blue(annual_maxima, probablity_non_exceedence, 'max')
-                        floor_peak.append(peak_value)
-                    peaks.append(floor_peak)
-                return np.array(peaks)
+                abs_max = np.where(np.abs(max_value) >= np.abs(min_value), max_value, min_value)
+                return abs_max
+            
 
     def get_top_floor_acceleration_data(self, mode_shapes:np.ndarray, natural_circular_frequency:np.ndarray, method:str, probablity__non_exceedence: float|list = None) -> float|list:
         """
@@ -1240,14 +1515,3 @@ class TimeDomainAnalysis:
         Get the top floor acceleration data for a given method.
         """
         return self.get_acceleration_data(mode_shapes[:,floor_number], natural_circular_frequency, method, probablity__non_exceedence)
-
-
-
-
-
-                
-
-
-
-
-        

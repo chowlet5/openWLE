@@ -9,7 +9,7 @@ from geopy.distance import distance
 
 import openWLE.extreme_blue as extreme_blue
 from openWLE.exception import InputError
-
+from openWLE.windProfile import WindProfile
 
 class ClimateStudy:
 
@@ -25,7 +25,6 @@ class ClimateStudy:
             self.site_location = config['site_location'] if 'site_location' in config.keys() else None
             self.station_radius = config['station_radius'] if 'station_radius' in config.keys() else None
             self.stations_ids = config['stations_ids'] if 'stations_ids' in config.keys() else None
-            
             self.start_dates = config['start_dates'] if 'start_dates' in config.keys() else None
             self.end_dates = config['end_dates'] if 'end_dates' in config.keys() else None
 
@@ -78,7 +77,6 @@ class ClimateStudy:
 
             pass
 
-        
     def run_automatic_station_selection(self):
 
         station_list = self.get_closest_station(self.station_radius,True,True)
@@ -351,12 +349,57 @@ class ClimateStudy:
         return wind_occurance,index,frequency_values
 
 
+    def change_site_exposure(self, wind_speed:float, 
+                             height: float, 
+                             original_exposure_parameter:dict, 
+                             new_exposure_parameter:dict, 
+                             new_height:float = None) -> float:
+        
+        if new_height == None:
+            new_height = height
+        
+
+        original_exposure_parameter['u_ref'] = wind_speed
+        original_exposure_parameter['z_ref'] = height
+
+        original_exposure = WindProfile(**original_exposure_parameter)
+
+        match new_exposure_parameter['profile_type'].lower():
+
+            case 'logarithmic':
+                zg_original = original_exposure.gradient_height
+                zg_new = new_exposure_parameter['gradient_height']
+                
+                roughness_length_original = original_exposure.profile.roughness_length
+                roughness_length_new = new_exposure_parameter['roughness_length']
+                
+                zg_roughness_original = zg_original/roughness_length_original
+                zg_roughness_new = zg_new/roughness_length_new
+
+                new_u_star = original_exposure.profile.u_star * math.log(zg_roughness_original)/ math.log(zg_roughness_new)
+                new_exposure_parameter['u_star'] = new_u_star
+
+                new_exposure = WindProfile(**new_exposure_parameter)
+                new_wind_speed = new_exposure.along_wind_velocity_profile(new_height)
+
+            case 'power_law':
+                
+                gradient_speed = original_exposure.gradient_wind_speed()
+                zg_new = new_exposure_parameter['gradient_height']
+                alpha_new = new_exposure_parameter['alpha']
+                new_wind_speed = gradient_speed * (new_height/zg_new)**alpha_new
+
+            case _:
+                raise ValueError('Invalid profile type. Choose from logarithmic or power_law')
+
+        return new_wind_speed
+
+
+
 
     def save_climate_data(self, HDF5_file:object) -> None: #TODO Complete save function
 
         dgroup = HDF5_file.create_group('Climate_data')
-
-        
 
         climate_dtypes = [()]     
 

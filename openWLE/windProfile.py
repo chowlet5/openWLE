@@ -7,6 +7,8 @@ class WindProfile(Constants):
 
     def __init__(self, profile_type:str, **kwargs):
 
+        self.gradient_height = kwargs['gradient_height']
+
         if profile_type.lower() == 'logarithmic':
             roughness_length = kwargs['roughness_length']
             latitude = kwargs['latitude']
@@ -35,6 +37,9 @@ class WindProfile(Constants):
     def along_wind_velocity_profile(self, z):
         return self.profile.along_wind_velocity_profile(z)
     
+    def gradient_wind_speed(self):
+        return self.profile.along_wind_velocity_profile(self.gradient_height)
+
     def change_reference(self, z_original_ref:float, z_new_ref:float) -> None:
 
         u_original_ref = self.profile.along_wind_velocity_profile(z_original_ref)

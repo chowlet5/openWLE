@@ -12,12 +12,13 @@ class WindProfile(Constants):
         if profile_type.lower() == 'logarithmic':
             roughness_length = kwargs['roughness_length']
             latitude = kwargs['latitude']
-            
-            if 'zero_plane_displacement' not in kwargs:
-                warnings.warn('Zero plane displacement not provided. Assuming zero.')
-                zero_plane_displacement = 0
-            else:
-                zero_plane_displacement = kwargs['zero_plane_displacement']
+
+            #Removed based on reviewer comment            
+            # if 'zero_plane_displacement' not in kwargs:
+            #     warnings.warn('Zero plane displacement not provided. Assuming zero.')
+            #     zero_plane_displacement = 0
+            # else:
+            #     zero_plane_displacement = kwargs['zero_plane_displacement']
             
             u_star = kwargs['u_star'] if 'u_star' in kwargs else None
             u_ref = kwargs['u_ref'] if 'u_ref' in kwargs else None
@@ -64,7 +65,8 @@ class WindProfile(Constants):
             
             dset.attrs['roughness_length'] = self.profile.roughness_length
             dset.attrs['u_star'] = self.profile.u_star
-            dset.attrs['zero_plane_displacement'] = self.profile.zero_plane_displacement
+            # removed based on reviewer's comment
+            # dset.attrs['zero_plane_displacement'] = self.profile.zero_plane_displacement
             if self.profile.u_ref:
                 dset.attrs['u_ref'] = self.profile.u_ref
             if self.profile.z_ref:
@@ -79,11 +81,12 @@ class WindProfile(Constants):
 
 class LogarithmicWindProfile(WindProfileBase,Constants):
     
-    def __init__(self, roughness_length:float, latitude:float, zero_plane_displacement:float = 0, u_star:float = None,
+    def __init__(self, roughness_length:float, latitude:float, u_star:float = None,
                   u_ref:float = None, z_ref:float = None, ):
         
         self.roughness_length = roughness_length
-        self.zero_plane_displacement = zero_plane_displacement
+        # Removed based on reviewer comment
+        #self.zero_plane_displacement = zero_plane_displacement
         self.latitude = latitude
 
         if u_star is not None:
@@ -101,12 +104,14 @@ class LogarithmicWindProfile(WindProfileBase,Constants):
 
     def calc_u_star(self, u_ref:float, z_ref:float) -> None:
         f = 2*self.EARTH_ROTATION*np.sin(np.radians(self.latitude))
-        self.u_star = (u_ref - (f*z_ref*34.5/self.VON_KARMAN))/(np.log(z_ref/self.roughness_length)/self.VON_KARMAN) # Based on Cook 1997 and ESDU 
+        # Add roughness length to height based on reviewer's comment
+        self.u_star = (u_ref - (f*z_ref*34.5/self.VON_KARMAN))/(np.log(z_ref+self.roughness_length/self.roughness_length)/self.VON_KARMAN) # Based on Cook 1997 and ESDU 
         
     def along_wind_velocity_profile(self, z):
 
         f = 2*self.EARTH_ROTATION*np.sin(np.radians(self.latitude))
-        return self.u_star/self.VON_KARMAN*np.log(z/self.roughness_length) + 34.5*f*z/self.VON_KARMAN # Based on Cook 1997 and ESDU
+        # Add roughness length to height based on reviewer's comment
+        return self.u_star/self.VON_KARMAN*np.log(z+self.roughness_length/self.roughness_length) + 34.5*f*z/self.VON_KARMAN # Based on Cook 1997 and ESDU
     
 
 class PowerLawWindProfile(WindProfileBase,Constants):

@@ -225,6 +225,7 @@ class VisualizationProcessor:
             case 'displacement':
                 floors = options['floors'] if options.__contains__('floors') else None
                 direction_index = {'x' : 0, 'y' : 1, 'z' : 2}
+                floor_displacement = []
                 if isinstance(floors,str):
                     if floors.lower() == 'top':
                         floor_displacement = building_instance.displacement_time_history[-1]
@@ -232,7 +233,6 @@ class VisualizationProcessor:
                         InputError("floors.lower() == 'top'", "Incorrect input. 'top' is the only valid string entry")
                 elif floors == None:
                     floor_displacement = building_instance.displacement_time_history
-
                 else:
                     floor_displacement = building_instance.displacement_time_history[floors]
                 value = floor_displacement[direction_index[direction]] 
@@ -618,11 +618,79 @@ class ClimateVisualizationProcessor(Visualization):
         
         self.plot_time_history()
 
+
     def plot_time_history(self):
         pass
 
     def wind_rose_config(self,config:dict) -> None:
         self.processing_ids = self.id_check(config['id'])
+
+    def wind_speed_histogram(self, wind_data:pd.DataFrame, predefined_speeds:list = None) -> pd.DataFrame:
+
+        if predefined_speeds is None:
+            
+            max_speed = math.ceil(wind_data['Wind Spd (m/s)'].max())
+            max_speed += (5 * round(0.5*max_speed/5)) # Add half the max speed (rounded to nearest 5) to the max speed for visualization purposes
+            predefined_speeds = np.arange(0,max_speed+1,1)
+        
+
+        wind_speeds = wind_data['Wind Spd (m/s)'].to_numpy()
+        
+        histogram = np.histogram(wind_speeds, bins=predefined_speeds)
+        histogram = (histogram[0]/sum(histogram[0]),histogram[1])
+
+        return histogram, predefined_speeds
+
+
+    def calc_wind_speed_occurance(self, wind_records:np.ndarray,present_wind_speeds:list = None) -> np.ndarray:
+
+        present_wind_speeds = np.sort(present_wind_speeds)
+        count = []
+        for i in range(len(present_wind_speeds[:-1])):
+            
+            low_speed = present_wind_speeds[i]
+            high_speed = present_wind_speeds[i+1]
+            logic = np.logical_and(low_speed <= wind_records,wind_records < high_speed)
+            count.append(np.sum(logic))
+        
+        count.append(np.sum(wind_records > present_wind_speeds[-1]))
+        
+        return np.array(count)
+
+    def wind_speed_legend(self,predefined_speeds:list) ->list:
+        index = []
+        for i in range(len(predefined_speeds)-1):
+            index.append(f'{predefined_speeds[i]}≤V<{predefined_speeds[i+1]}')
+        index.append(f'V≥{predefined_speeds[-1]}')
+
+        return index
+
+    def calc_wind_rose_data(self, wind_data:pd.DataFrame, directions:list, predefined_speeds:list = None, frequency_values:list = None) -> pd.DataFrame:
+
+        if predefined_speeds is None:
+            num_speeds = 5
+            max_speed = wind_data['Wind Spd (m/s)'].max()
+            predefined_speeds = np.linspace(0, max_speed, num_speeds)
+        
+        total_elements = len(wind_data['Wind Dir'])
+        wind_occurance = {}
+        for direction in directions:
+            wind_speeds = wind_data[wind_data['Wind Dir'] == direction]['Wind Spd (m/s)'].to_numpy()
+            
+            wind_occurance[direction] = self.calc_wind_speed_occurance(wind_speeds, predefined_speeds)/total_elements
+
+        index = self.wind_speed_legend(predefined_speeds)
+        
+        wind_occurance = pd.DataFrame(wind_occurance,index=index)
+
+        if frequency_values is None:
+            
+            max_freq = wind_occurance.max().max()
+            max_freq = (math.ceil(max_freq*100 / 2.) * 2)/100
+
+            frequency_values = np.linspace(0,max_freq,5)
+        
+        return wind_occurance,index,frequency_values
 
 
 # Point Base Vis 

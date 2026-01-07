@@ -20,7 +20,7 @@ The development of this workflow is part of the following article. We would grea
   journal = {Advances in Engineering Software},
   volume = {},
   pages = {},
-  year = {2025},
+  year = {2026},
   publisher = {Elsevier},
   doi = {}
 }

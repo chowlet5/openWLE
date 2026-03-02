@@ -21,7 +21,7 @@ class ClimateStudy:
 
     '''
 
-    def __init__(self, use_ECCC_data:bool, automatic_station_selection:bool, config:dict = None):
+    def __init__(self, use_eccc_data:bool, automatic_station_selection:bool, config:dict = None):
 
         self.config = config
         site_location = None
@@ -47,7 +47,7 @@ class ClimateStudy:
             if config.__contains__('csv_path'):
                 site_location = config['csv_path'] 
 
-        if use_ECCC_data:
+        if use_eccc_data:
             self.eccc_collector = ECCCCollector(site_location,station_ids,start_dates,end_dates)
             self.run_station_selection(automatic_station_selection, search_radius)
         else:
@@ -62,7 +62,8 @@ class ClimateStudy:
             automatic_station_selection (bool): Determines if the weather stations will be selected using the 
                                                 default station selection criteria within OpenWLE. If false,
                                                 the user manually selects the stations to obtain data from.
-            search_radius (float, optional): The search radius used for the automatic weather station search. Defaults to 10.
+            search_radius (float, optional): The search radius used for the automatic weather station search. 
+                                             Defaults to 10.
 
         Raises:
             InputError: climateStudy.site_location is None. site_location is required for automatic station selection.
@@ -75,7 +76,7 @@ class ClimateStudy:
                 raise InputError("climateStudy.site_location = None",
                                 "ClimateStudy Module: site_location is required for automatic station selection."
                                 +" Please provide the design site latitude and longitude in decimal degrees.")
-        
+
             self.eccc_collector.find_weather_stations(search_radius)
             self.collect_eccc_data()
         else:
@@ -83,10 +84,8 @@ class ClimateStudy:
                 raise InputError("climateStudy.station_ids = None",
                                 "ClimateStudy Module: station_ids are required for manual station selection."
                                 +" Please provide the station_ids to collect data from.")
-            
-            self.collect_eccc_data()
-            
 
+            self.collect_eccc_data()
 
     def read_csv(self, file_path:str) -> pd.DataFrame:
         """Imports climate data from a csv file. This method assumed imported data is from a single weather station.
@@ -99,7 +98,7 @@ class ClimateStudy:
             pd.DataFrame: A pandas dataframe containing the imported climate data.
         """
         data = pd.read_csv(file_path, header = 0 )
-        data['Date/Time'] = pd.to_datetime(self.data['Date/Time'])
+        data['Date/Time'] = pd.to_datetime(data['Date/Time'])
 
         self.climate_data = {'00000':data}
 
@@ -110,14 +109,6 @@ class ClimateStudy:
         """
 
         self.climate_data = self.eccc_collector.get_selected_station_data()
-
-    
-
-    def weibull_distribution(self, wind_data:pd.DataFrame) -> tuple:
-
-        weibull_parameters = stats.weibull_min.fit(wind_data['Wind Spd (m/s)'], floc=0)
-        weibull = stats.weibull_min(*weibull_parameters)
-        return weibull
 
 
     def change_site_exposure(self, wind_speed:float,
@@ -333,17 +324,19 @@ class ECCCCollector:
         Returns:
             tuple: _description_
         """
-
+        start_date = None
+        end_date = None
         try:
             station_id_index = self.all_station_list['Station ID'] == station_id
             start_date = int(self.all_station_list[station_id_index]['HLY First Year'].values[0])
             end_date = int(self.all_station_list[station_id_index]['HLY Last Year'].values[0])
-            return (start_date, end_date)
+            
         except KeyError:
             print(f"An invalid station_id was provided: {station_id}")
         except Exception as e:
             print(f"An unexpected error occurred: {e}")
 
+        return (start_date, end_date)
 
     def process_ECCC_climate_data(self, climate_data:pd.DataFrame) -> pd.DataFrame:
         """Read data from ECCC databases and performs unit conversions and removes 
@@ -451,14 +444,27 @@ class ECCCCollector:
 
 
 class ClimateDataAnalyzer:
-
+    """The ClimateDataAnalyzer class contains methods for analyzing wind climate data. Methods include extracting annual peaks from
+    hourly time wind climate dataframes or fitting wind speed data to a probability function.
+    """
     def __init__(self):
         pass
 
-    
-    def calc_yearly_peaks(self, data:pd.DataFrame, wind_speed_field:str = 'Wind Spd (m/s)', overlap_date:int = 4) -> pd.DataFrame:
-        """
-        Function to calculate the yearly peaks from the data
+    def calc_yearly_peaks(self, data:pd.DataFrame, 
+                          wind_speed_field:str = 'Wind Spd (m/s)', 
+                          overlap_date:int = 4) -> pd.DataFrame:
+        """Extracts the annual peaks from the input dataset.
+
+        Args:
+            data (pd.DataFrame): The hourly wind dataset.
+            wind_speed_field (str, optional): The name of the column which contains the wind speed data.
+                                              Defaults to 'Wind Spd (m/s)'.
+            overlap_date (int, optional): The number of day that a single storm event would influcence the wind speed.
+                                          This helps to maintain independence between events. Defaults to 4.
+
+        Returns:
+            pd.DataFrame: The annual peak wind speeds for unquie each wind direction in the
+                          original wind dataset.
         """
         temp_data = data.copy()
         wind_speeds = []
@@ -467,52 +473,66 @@ class ClimateDataAnalyzer:
             temp = temp_data[temp_data['Date/Time'].dt.year==year]
             max_value = temp[wind_speed_field].max()
             date = temp[temp[wind_speed_field]==max_value]['Date/Time'].values[-1]
-            
             temp_data = temp_data[~(temp_data['Date/Time']< (date+np.timedelta64(overlap_date,'D')))]
-            wind_speeds.append((date,max_value))
-            
+            wind_speeds.append((date, year, max_value))
 
-        # yearly_peaks = data.groupby(data['Date/Time'].dt.year).max(numeric_only=True)
-        yearly_peaks = pd.DataFrame(wind_speeds,columns=['Date/Time',wind_speed_field])
-        yearly_peaks['Date/Time'] = pd.to_datetime(yearly_peaks['Date/Time'])
-        return yearly_peaks
-    
+        yearly_peaks = pd.DataFrame(wind_speeds,columns=['Date/Time', 'Year', wind_speed_field])
+        return yearly_peaks.copy()
+
     def calc_yearly_peaks_directionality(self, data:pd.DataFrame, 
                                          wind_speed_field:str = 'Wind Spd (m/s)', 
                                          overlap_date:int = 4) -> pd.DataFrame:
-        """
-        Function to calculate the yearly peak directionality from the data
-        """
-        directionality_data = []
-        temp_data = data.copy()
+        """Extracts the annual peaks for each unquie wind direction in the dataset.
 
-        years = sorted(list(set(data['Date/Time'].dt.year)))
+        Args:
+            data (pd.DataFrame): The hourly wind dataset. The direction column is named 'Wind Dir' and
+                                 the date is stored in the Date/Time column.
+            wind_speed_field (str, optional): The name of the column which contains the wind speed data.
+                                              Defaults to 'Wind Spd (m/s)'.
+            overlap_date (int, optional): The number of day that a single storm event would influcence the wind speed.
+                                          This helps to maintain independence between events. Defaults to 4.
+
+        Returns:
+            pd.DataFrame: The annual peak wind speeds for unquie each wind direction in the
+                          original wind dataset.
+        """
+        directionality_data = None
+        temp_data = data.copy()
+        
+        
         columns = sorted(list(set(data['Wind Dir'][data['Wind Dir'].notna()])))[1:]
         
         for wind_dir in columns:
-            temp = temp_data.where(data['Wind Dir'] == wind_dir)
 
-            directional_peaks = 
+            temp = temp_data[temp_data['Wind Dir'] == wind_dir]
 
-        
-        for year in years:
-            temp = temp_data[temp_data['Date/Time'].dt.year==year]
-            wind_speeds = []
-            dates = []
-            for wind_dir in columns:
-                hold = temp.where(data['Wind Dir'] == wind_dir)
-                max_value = hold[wind_speed_field].max()
-                wind_speeds.append(max_value)
-                dates.append(hold[hold[wind_speed_field]==max_value]['Date/Time'].values[-1])
+            directional_peaks = self.calc_yearly_peaks(temp, 
+                                                       wind_speed_field, 
+                                                       overlap_date)
             
-            temp_data = temp_data[~(temp_data['Date/Time']< (max(dates)+np.timedelta64(overlap_date,'D')))]
 
-            directionality_data.append(tuple([max(dates).astype('datetime64[Y]')]+wind_speeds))
+            directional_peaks.drop(columns = 'Date/Time',inplace=True)
+            directional_peaks.rename(columns={wind_speed_field:f'Wind Spd (m/s) - {wind_dir} deg'}, inplace = True)
+            directional_peaks.set_index('Year',inplace = True)
+            if directionality_data is None:
+                directionality_data = directional_peaks.copy()
+            else:
+                directionality_data = directionality_data.join(directional_peaks)
 
-        new_columns = ['Date/Time'] + [int(c) for c in columns]
-        yearly_peak_directionality = pd.DataFrame(directionality_data, columns= new_columns)
+        return directionality_data
+    
+    def weibull_distribution(self, wind_data:pd.DataFrame) -> object:
+        """Fits the wind data found in the Wind Spd (m/s) column to a weibull distribution and return the weibull 
+        distribution object.
 
-        return yearly_peak_directionality
+        Args:
+            wind_data (pd.DataFrame): a dataframe which stores the wind speed data in a column named 'Wind Spd (m/s)'
+        Returns:
+            object: the weibull distribution object from Scipy.
+        """
+        weibull_parameters = stats.weibull_min.fit(wind_data['Wind Spd (m/s)'], floc=0)
+        weibull = stats.weibull_min(*weibull_parameters)
+        return weibull
 
     
     

@@ -195,13 +195,14 @@ class ECCCCollector:
     '''
 
     base_url = "http://climate.weather.gc.ca/climate_data/bulk_data_e.html?"
-    station_list_url = "https://collaboration.cmc.ec.gc.ca/cmc/climate/Get_More_Data_Plus_de_donnees/Station%20Inventory%20EN.csv"
+    station_list_url = "https://collaboration.cmc.ec.gc.ca/cmc/climate/Get_More_Data_Plus_de_donnees/" \
+                        "Station%20Inventory%20EN.csv"
 
     def __init__(self, site_location:tuple = None,
                  station_ids:list = None,
                  start_dates:list = None,
                  end_dates:list = None):
-        
+
         self.site_location = site_location
         self.station_ids = station_ids
         self.start_dates = start_dates
@@ -216,19 +217,16 @@ class ECCCCollector:
         self.all_station_list = self.get_station_list()
 
 
-    
-
     def get_station_list(self) -> pd.DataFrame:
         """Get the station list from the data dictionary.
 
         Returns:
-            pd.DataFrame: _description_
+            pd.DataFrame: A pandas dataframe which contains all avaliable weather station part of ECCC.
         """
         station_list = pd.read_csv(self.station_list_url, header=0, skiprows=[0,1,2])
         station_list = station_list[station_list['Latitude (Decimal Degrees)'].notna()]
         station_list = station_list[station_list['Longitude (Decimal Degrees)'].notna()]
-        
-        
+
         return station_list
 
     def geo_distance(self, row: dict, latitude:float, longitude:float) -> float: 
@@ -244,7 +242,9 @@ class ECCCCollector:
             float: The computed distance in kilometers
         """
 
-        return distance((latitude, longitude), (row['Latitude (Decimal Degrees)'], row['Longitude (Decimal Degrees)'])).km
+        return distance((latitude, longitude), 
+                        (row['Latitude (Decimal Degrees)'], 
+                         row['Longitude (Decimal Degrees)'])).km
 
     def calc_station_distance(self, latitude:float = None,  longitude:float = None,) -> None:
         """Computes the distance to all available weather station hosted by ECCC 
@@ -330,7 +330,7 @@ class ECCCCollector:
             station_id_index = self.all_station_list['Station ID'] == station_id
             start_date = int(self.all_station_list[station_id_index]['HLY First Year'].values[0])
             end_date = int(self.all_station_list[station_id_index]['HLY Last Year'].values[0])
-            
+
         except KeyError:
             print(f"An invalid station_id was provided: {station_id}")
         except Exception as e:
@@ -348,7 +348,7 @@ class ECCCCollector:
         Returns:
             pd.DataFrame: Returns the processed climate dataframe
         """
-        
+
         climate_data['Date/Time (LST)'] = pd.to_datetime(climate_data['Date/Time (LST)'])
         climate_data['Wind Spd (m/s)'] = climate_data['Wind Spd (km/h)'] * 1000 / 3600
         climate_data['Wind Dir'] = climate_data['Wind Dir (10s deg)']*10
@@ -382,8 +382,7 @@ class ECCCCollector:
 
             station_data[station] = data
 
-        
-        return station_data 
+        return station_data
 
     def get_ECCC_data(self, station_id:str, start_date:str, end_date:str) -> pd.DataFrame:
         """Collect hourly climate data from the ECCC database for a given station_id. 
@@ -391,8 +390,10 @@ class ECCCCollector:
 
         Args:
             station_id (str): The id of the station where the data is located at.
-            start_date (str): The date to start collecting data from. String format follows an abbreviated month and year format '%b%Y'
-            end_date (str): The date to stop collecting data from. String format follows an abbreviated month and year format '%b%Y'
+            start_date (str): The date to start collecting data from. String format follows an 
+                              abbreviated month and year format '%b%Y'
+            end_date (str): The date to stop collecting data from. String format follows an 
+                            abbreviated month and year format '%b%Y'
 
         Returns:
             pd.DataFrame: The raw climate data recieved from the ECCC database.
@@ -439,13 +440,14 @@ class ECCCCollector:
                 print(f"Failed to get data for {station_id} - {year} - {month}. Attempting again in 10s")
                 time.sleep(10)
                 counter += 1
-        
-        return data   
+
+        return data
 
 
 class ClimateDataAnalyzer:
-    """The ClimateDataAnalyzer class contains methods for analyzing wind climate data. Methods include extracting annual peaks from
-    hourly time wind climate dataframes or fitting wind speed data to a probability function.
+    """The ClimateDataAnalyzer class contains methods for analyzing wind climate data. 
+    Methods include extracting annual peaks from hourly time wind climate dataframes 
+    or fitting wind speed data to a probability function.
     """
     def __init__(self):
         pass
@@ -498,10 +500,9 @@ class ClimateDataAnalyzer:
         """
         directionality_data = None
         temp_data = data.copy()
-        
-        
+
         columns = sorted(list(set(data['Wind Dir'][data['Wind Dir'].notna()])))[1:]
-        
+
         for wind_dir in columns:
 
             temp = temp_data[temp_data['Wind Dir'] == wind_dir]
@@ -534,15 +535,30 @@ class ClimateDataAnalyzer:
         weibull = stats.weibull_min(*weibull_parameters)
         return weibull
 
-    
-    
+ 
 class ExtremeWindSpeedEstimation:
-
+    """Contains the different methods for estimating extreme wind speed values. The wind speed estimations are based on
+    the Liebien BLUE method.
+    """
     def __init__(self):
         pass
 
-    def extreme_wind_speed_estimation(self, annual_peak_wind_speeds:np.ndarray, return_period:float|list = 50) -> np.ndarray:
-        annual_peak_wind_speeds = annual_peak_wind_speeds.copy() 
+    def extreme_wind_speed_estimation(self, annual_peak_wind_speeds:np.ndarray, 
+                                      return_period:float|list = 50) -> np.ndarray:
+        """Estimates the extreme wind speeds using the Liebien BLUE extreme value analysis method. 
+        The estimated wind speeds is based on the annual maxima wind speeds
+
+        Args:
+            annual_peak_wind_speeds (np.ndarray): An array containing the annual peak wind speeds
+            return_period (float | list, optional): The return period associated with the estimated extreme wind speed.
+                                                    This can either be a float value or an array of float values. 
+                                                    Defaults to 50.
+
+        Returns:
+            np.ndarray: An array of extreme values with the same shape as the return_period variable. 
+                        When return_period is a float, the array shape will be (1,)
+        """
+        annual_peak_wind_speeds = annual_peak_wind_speeds.copy()
         if annual_peak_wind_speeds.shape[0] == 1:
             annual_peak_wind_speeds = np.expand_dims(annual_peak_wind_speeds, axis=0)
         
@@ -556,12 +572,52 @@ class ExtremeWindSpeedEstimation:
 
         return np.array(wind_speed)
     
-    def get_nondirectional_peaks(self, directional_annual_peaks:np.ndarray):
+    def get_nondirectional_peaks(self, directional_annual_peaks:np.ndarray) -> np.ndarray:
+        """Extracts the nondirectional peaks from the directional peak array
+
+        Args:
+            directional_annual_peaks (np.ndarray): an array of directional peaks where axis_0 
+                                                    is the different direction
+
+        Returns:
+            np.ndarray: an array of nondirectional annual peaks wind speeds
+        """
 
         return np.max(directional_annual_peaks.copy(),axis = 0)
-    
-    def sector_based_wind_speed_estimation(self, annual_peak_wind_speeds:np.ndarray, return_period:float|list = 50, max_reduction:float = 0.3, non_directional_scale:bool = True, non_directional_wind_speed: float|list = None):
+  
+    def sector_based_wind_speed_estimation(self, annual_peak_wind_speeds:np.ndarray, 
+                                           return_period:float|list = 50, 
+                                           max_reduction:float = 0.3, 
+                                           non_directional_scale:bool = True, 
+                                           non_directional_wind_speed: float|list = None) ->np.ndarray:
+        """Computes the estimates wind speeds for each unique wind direction found in the 
+        annual_peak_wind_speeds array. 
 
+        Args:
+            annual_peak_wind_speeds (np.ndarray): The annual peak wind speeds separated by sectors/ wind directions.
+                                                  The unique wind directions are along axis_0.
+            return_period (float | list, optional): The return period associated with the estimated extreme wind speed.
+                                                    This can either be a single float value or 
+                                                    an array of return periods.
+                                                    Defaults to 50.
+            max_reduction (float, optional): The maximum acceptable reduction in wind speed compared to the 
+                                            nondirection peak wind speed. This adds conservatism to the 
+                                            estimation. Defaults to 0.3.
+            non_directional_scale (bool, optional): Scales the sector-based wind speed to ensure the sector with the max wind 
+                                                    speed is equal to the estimated nondirectional wind speed. This adds some conservatism to the estimated values.
+                                                    Defaults to True.
+            non_directional_wind_speed (float | list, optional): The nondirectional wind speed to be used to scale the sector based wind speeds.
+                                                                 This can either be a float value or an array of float values. 
+                                                                 This should match the return_period variable. If None, the nondirection wind speed will 
+                                                                 be estimated using the return_periods provided. Defaults to None.
+
+        Raises:
+            InputError: If multiple nondirectional wind speeds are provided for scaling, then the return_period variable 
+                        should contain the same number of return period values.
+
+        Returns:
+            np.ndarray: An array containing the sector based estimated wind speeds (axis_0) for each return period provided (axis_1)
+        """
         if isinstance(non_directional_wind_speed, list):
             if len(return_period) != len(non_directional_wind_speed):
                 raise InputError('len(return_period) == len(non_directional_wind_speed)','Number of non directional wind speed does not match number of return periods.')

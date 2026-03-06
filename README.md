@@ -14,14 +14,14 @@ The proposed workflow is developed using Python for easy readability and adoptio
 ## Citing
 The development of this workflow is part of the following article. We would greatly appreciate it if you would please cite the following paper if you found the workflow useful for your work.
 ```
-@articile{howlett2025bitsuamlak,
-  title = {},
+@articile{howlettbitsuamlak2026,
+  title = {An open-source computational wind load evaluation workflow for tall building design},
   author = {Howlett, Christopher J. and Bitsuamlak, Girma T.},
   journal = {Advances in Engineering Software},
-  volume = {},
-  pages = {},
-  year = {2025},
+  volume = {215},
+  pages = {104117},
+  year = {2026},
   publisher = {Elsevier},
-  doi = {}
+  doi = {https://doi.org/10.1016/j.advengsoft.2026.104117}
 }
 ```

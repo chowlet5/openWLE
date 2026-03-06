@@ -32,20 +32,20 @@ class ClimateStudy:
         csv_path = None
 
         self.climate_data = None
-
+        
         if self.config is not None:
             if config.__contains__('site_location'):
                 site_location = config['site_location'] 
             if config.__contains__('search_radius'):
-                site_location = config['search_radius'] 
+                search_radius = config['search_radius'] 
             if config.__contains__('stations_ids'):
-                site_location = config['stations_ids'] 
+                station_ids = config['stations_ids'] 
             if config.__contains__('start_dates'):
-                site_location = config['start_dates'] 
+                start_dates = config['start_dates'] 
             if config.__contains__('end_dates'):
-                site_location = config['end_dates'] 
+                end_dates = config['end_dates'] 
             if config.__contains__('csv_path'):
-                site_location = config['csv_path'] 
+                csv_path = config['csv_path'] 
 
         if use_eccc_data:
             self.eccc_collector = ECCCCollector(site_location,station_ids,start_dates,end_dates)
@@ -194,7 +194,7 @@ class ECCCCollector:
     
     '''
 
-    base_url = "http://climate.weather.gc.ca/climate_data/bulk_data_e.html?"
+    base_url = "https://climate.weather.gc.ca/climate_data/bulk_data_e.html?"
     station_list_url = "https://collaboration.cmc.ec.gc.ca/cmc/climate/Get_More_Data_Plus_de_donnees/" \
                         "Station%20Inventory%20EN.csv"
 
@@ -285,6 +285,10 @@ class ECCCCollector:
         """
 
         station_list = self.all_station_list
+        
+        if  'distance' not in station_list.keys():
+            self.calc_station_distance()
+
         closest_station = station_list[station_list['distance'] < search_radius]
 
         if wind_speed_only:
@@ -295,7 +299,7 @@ class ECCCCollector:
 
         return closest_station.sort_values('distance')
 
-    def find_weather_stations(self, search_radius:float) -> None:
+    def find_all_airport_stations(self, search_radius:float) -> None:
         """Search for each weather station within a search radius within the design site. 
         Collect wind data from each weather station located at an airport. 
         Stores station id, name, location and date range data.
@@ -312,7 +316,7 @@ class ECCCCollector:
         if self.start_dates is None:
             self.start_dates = station_list['HLY First Year'].values
         if self.end_dates is None:
-            self.start_dates = station_list['HLY Last Year'].values
+            self.end_dates = station_list['HLY Last Year'].values
 
 
     def get_hourly_station_start_end_date(self, station_id:str ) -> tuple:
@@ -427,7 +431,7 @@ class ECCCCollector:
         """
 
         query_string = f"format=csv&stationID={station_id}&Year={year}&Month={month}"
-        query_string += "&timeframe=1&submit=Download+Data"
+        query_string += "&Day=14&timeframe=1&submit=%20Download+Data"
 
         data_endpoint = self.base_url + query_string
         counter = 0

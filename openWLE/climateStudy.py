@@ -77,7 +77,7 @@ class ClimateStudy:
                                 "ClimateStudy Module: site_location is required for automatic station selection."
                                 +" Please provide the design site latitude and longitude in decimal degrees.")
 
-            self.eccc_collector.find_weather_stations(search_radius)
+            self.eccc_collector.find_all_airport_stations(search_radius)
             self.collect_eccc_data()
         else:
             if self.eccc_collector.station_ids is None:

@@ -1,6 +1,6 @@
 # OpenWLE: An open-source workflow for the computational wind load evaluation of tall buildings
 
-Data and Code for the paper: [Insert Paper Link] 
+Data and Code for this paper: https://www.sciencedirect.com/science/article/pii/S0965997826000232
 
 This workflow presents the structural wind load evaluation analysis process for tall buildings. The framework is designed using methodology found in wind tunnel testing but is capable of being applied for computational-based wind loading studies using CFD.
 Each step within the wind load evaluation pipeline is outlined along with the related background details.

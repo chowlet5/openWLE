@@ -7,3 +7,12 @@ openWLE/__main__.py
 openWLE/__pycache__/
 
 todo_list.txt
+
+#uv details
+.python-version
+pyproject.toml
+.venv
+uv.lock
+ruff.toml
+
+.vscode

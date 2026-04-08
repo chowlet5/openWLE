@@ -1,44 +1,42 @@
-import numpy as np
 import itertools
-from shapely import Polygon as PolyShape
-from scipy.interpolate import griddata, bisplrep, bisplev, RBFInterpolator
 
-from openWLE.geometry import plane_intersection, WLEPolygon, moment_arm_scalar
+import numpy as np
+from scipy.interpolate import RBFInterpolator, bisplev, bisplrep, griddata
+from shapely import Polygon as PolyShape
+
+from openWLE.geometry import WLEPolygon, moment_arm_scalar, plane_intersection
 from openWLE.pressureTap import PressureTap
 
 
-
 class Building:
-    """
-    Building Class
-    Description: Contains the methods to determine the global forces on a building structre under wind loading.
+    """A class containing information regarding the building's geometry: interior floors and exterior walls.
+    The class utlizes two subclasses (BuildingFloor and BuildingSurfaces) to organized pressure taps
+    and compute floor and global wind load.
 
     Attributes:
 
-
-    Methods:
-
-    
     """
+
     def __init__(self,config: dict) -> None:
-        
+
+
         self.config = config
-        self.origin = config['building_origin']
-        self.x_axis = config['x_axis']
-        self.y_axis = config['y_axis']
-        self.z_axis = config['z_axis']
-        self.building_height = config['building_height']
-        self.number_of_floors = config['number_of_floors']
-        self.first_floor_height = config['first_floor_height']
+        self.origin = config["building_origin"]
+        self.x_axis = config["x_axis"]
+        self.y_axis = config["y_axis"]
+        self.z_axis = config["z_axis"]
+        self.building_height = config["building_height"]
+        self.number_of_floors = config["number_of_floors"]
+        self.first_floor_height = config["first_floor_height"]
 
         self.pressure_tap_list = None
 
         self.surfaces = {}
         self.floors = {}
 
-        if 'surfaces' in config.keys():
-            for surface in config['surfaces']:
-                name = list(surface.keys())[0]
+        if "surfaces" in config:
+            for surface in config["surfaces"]:
+                name = next(iter(surface.keys()))
                 data = surface[name]
                 self.add_surface(name,data)
 
@@ -66,21 +64,19 @@ class Building:
 
     @property
     def force_sampling_frequency(self) -> float:
-        """
-        Return the force sampling frequency
+        """Return the force sampling frequency
         """
         if self._force_sampling_frequency:
             return self._force_sampling_frequency
-        else:
-            for tap in self.pressure_tap_list:
-                if tap.tap_cp is not None:
-                    self._force_sampling_frequency = tap.sampling_rate
-                    return self._force_sampling_frequency
-        
+        for tap in self.pressure_tap_list:
+            if tap.tap_cp is not None:
+                self._force_sampling_frequency = tap.sampling_rate
+                return self._force_sampling_frequency
+
     @property
     def displacement_time_history(self) -> np.ndarray:
         return self._displacement_time_history
-    
+
     @displacement_time_history.setter
     def displacement_time_history(self, value:np.ndarray) -> None:
         self._displacement_time_history = value
@@ -88,7 +84,7 @@ class Building:
     @property
     def acceleration_time_history(self) -> np.ndarray:
         return self._acceleration_time_history
-    
+
     @acceleration_time_history.setter
     def acceleration_time_history(self, value:np.ndarray) -> None:
         self._acceleration_time_history = value
@@ -106,16 +102,13 @@ class Building:
         return taps
 
     def get_horizontal_tap_ring_elevations(self, tolerance: float = 0.01) -> list:
-
+        """Get unique horizontal tap elevations
         """
-        Get unique horizontal tap elevations
-        """
-
         elevations = []
         for tap in self.pressure_tap_list:
             if tap is not None:
                 if 1 - np.abs(np.dot(tap.normal_vector, self.z_axis)) <= tolerance:
-                    continue 
+                    continue
                 if np.round(tap.z,5) not in [np.round(elev,5) for elev in elevations]:
                     elevations.append(tap.z)
 
@@ -126,13 +119,11 @@ class Building:
                 unique_elevations.append(elev)
         unique_elevations.sort()
         return unique_elevations
-        
+
 
     def generate_floors(self) -> None:
+        """Calculate the data to generate the floor objects
         """
-          Calculate the data to generate the floor objects
-        """
-
         if self.first_floor_height is None:
 
             tributary_height = [(self.building_height/self.number_of_floors)/2]*2
@@ -140,9 +131,9 @@ class Building:
             self.add_floor(0,[0,tributary_height[1]],0)
             # Add Intermediate Floors
             for floor_num in range(1,self.number_of_floors):
-                self.add_floor(floor_num,tributary_height,self.tributary_height*floor_num)
+                self.add_floor(floor_num,tributary_height,tributary_height*floor_num)
             # Roof Floor
-            self.add_floor(self.number_of_floors,[self.tributary_height/2,0],self.building_height)
+            self.add_floor(self.number_of_floors,[tributary_height/2,0],self.building_height)
         else:
 
             tributary_height = (self.building_height-self.first_floor_height)/(self.number_of_floors - 1)
@@ -152,51 +143,38 @@ class Building:
             self.add_floor(1,[self.first_floor_height/2,tributary_height/2],self.first_floor_height)
             # Add Intermediate Floors
             for floor_num in range(2,self.number_of_floors):
-                self.add_floor(floor_num,[tributary_height/2]*2, self.first_floor_height + (floor_num-1)*tributary_height)    
+                self.add_floor(floor_num,[tributary_height/2]*2, self.first_floor_height + (floor_num-1)*tributary_height)
             # Roof Floor
             self.add_floor(self.number_of_floors,[tributary_height/2,0],self.building_height)
 
     def add_floor(self, floor_num: int, tributary_height: list, floor_elev: float) -> None:
-        """
-        Add a floor to the building
-        """
-
+        """Add a floor to the building."""
         origin = (self.origin[0],self.origin[1],floor_elev)
         self.floors[floor_num] = BuildingFloor(floor_num,tributary_height,floor_elev,origin)
 
     def add_surface(self,name: str, data: dict) -> None:
-        """
-        Add a surface to the building
-        """
-
+        """Add a surface to the building."""
         self.surfaces[name] = BuildingSurface(name,**data)
 
     def assign_floor_taps(self) -> None:
-        """
-        Assign taps to the surfaces
-        """
-
+        """Assign taps to the surfaces."""
         for floor in self.floors.values():
             floor.find_floor_taps(list(self.surfaces.values()))
 
 
     def assign_surface_taps(self, surface_name: str, tap_list: list ) -> None:
-        """
-        Assign taps to the surfaces
-        """ 
-        
+        """Assign taps to the surfaces."""
         self.surfaces[surface_name].taps = tap_list.copy()
         self.surfaces[surface_name].set_tap_parameters(self.z_axis)
-        
-        if self.pressure_tap_list == None:
+
+        if self.pressure_tap_list is None:
             self.pressure_tap_list = tap_list
         else:
             self.pressure_tap_list += tap_list
 
 
     def calculate_base_shears(self, velocity: float, air_density: float) -> np.ndarray:
-        """
-        Calculate the base shear of the building
+        """Calculate the base shear of the building
         """
         self.force_x = 0
         self.force_y = 0
@@ -211,16 +189,14 @@ class Building:
         self.force_x = np.round(self.force_x,5)
         self.force_y = np.round(self.force_y,5)
         self.force_z = np.round(self.force_z,5)
-        
+
         self.base_shear_run = True
 
         return self.force_x, self.force_y, self.force_z
 
     def calculate_base_moments(self,  velocity: float, air_density: float) -> None:
+        """Calculate the base moment of the building
         """
-        Calculate the base moment of the building
-        """
-        
         self.moment_x = 0
         self.moment_y = 0
         self.moment_z = 0
@@ -237,13 +213,11 @@ class Building:
 
         self.base_moment_run = True
         return self.moment_x, self.moment_y, self.moment_z
-    
+
 
     def calculate_floor_forces(self, velocity: float, air_density: float) -> dict:
+        """Calculate the forces on each floor of the building
         """
-        Calculate the forces on each floor of the building
-        """
-
         self.floor_forces = {}
 
         for floor in self.floors.values():
@@ -252,12 +226,10 @@ class Building:
 
         self.floor_shear_run = True
         return self.floor_forces
-    
-    def calculate_floor_moments(self, velocity: float, air_density: float) -> dict:
-        """
-        Calculate the moments on each floor of the building
-        """
 
+    def calculate_floor_moments(self, velocity: float, air_density: float) -> dict:
+        """Calculate the moments on each floor of the building
+        """
         self.floor_moments = {}
         for floor in self.floors.values():
             moment_x, moment_y, moment_z = floor.moment_calculation(velocity, air_density, self.x_axis, self.y_axis, self.z_axis)
@@ -267,7 +239,7 @@ class Building:
 
 
     def get_lumped_mass_floor_forces(self) -> dict:
-        
+
         force_x = []
         force_y = []
         moment_z = []
@@ -278,9 +250,9 @@ class Building:
             moment_z.append(moments[2])
 
         floor_loads = {
-            'X':force_x,
-            'Y': force_y,
-            'Theta': moment_z
+            "X":force_x,
+            "Y": force_y,
+            "Theta": moment_z,
         }
 
         return floor_loads
@@ -288,44 +260,41 @@ class Building:
     def get_base_forces(self) -> dict:
 
         base_moments = {
-            'X': self.moment_x,
-            'Y': self.moment_y,
-            'Theta': self.moment_z}
-        
+            "X": self.moment_x,
+            "Y": self.moment_y,
+            "Theta": self.moment_z}
+
         return base_moments
 
 
     def save_building_data(self, HDF5file: object) -> None:
 
-        dgroup = HDF5file.create_group('Building_data')
-        dset = dgroup.create_dataset('Building_origin',data = self.origin)
-        dset.attrs['Description'] = 'Building origin'
-        dset = dgroup.create_dataset('Building_x_axis',data = self.x_axis)
-        dset.attrs['Description'] = 'Building x-axis'
-        dset = dgroup.create_dataset('Building_y_axis',data = self.y_axis)
-        dset.attrs['Description'] = 'Building y-axis'
-        dset = dgroup.create_dataset('Building_z_axis',data = self.y_axis)
-        dset.attrs['Description'] = 'Building z-axis'
-        dset = dgroup.create_dataset('Building_height',data = self.building_height)
-        dset.attrs['Description'] = 'Building height'
+        dgroup = HDF5file.create_group("Building_data")
+        dset = dgroup.create_dataset("Building_origin",data = self.origin)
+        dset.attrs["Description"] = "Building origin"
+        dset = dgroup.create_dataset("Building_x_axis",data = self.x_axis)
+        dset.attrs["Description"] = "Building x-axis"
+        dset = dgroup.create_dataset("Building_y_axis",data = self.y_axis)
+        dset.attrs["Description"] = "Building y-axis"
+        dset = dgroup.create_dataset("Building_z_axis",data = self.y_axis)
+        dset.attrs["Description"] = "Building z-axis"
+        dset = dgroup.create_dataset("Building_height",data = self.building_height)
+        dset.attrs["Description"] = "Building height"
 
         floors = []
         for floor in self.floors.values():
             floor_data = [floor.floor_num, floor.elevation, floor.tributary_height]
-            floors.append(floor_data) 
-        dset = dgroup.create_dataset('Floors',data = np.array(floors))
-        dset.attrs['Description'] = 'Floor information'
-        dset.attrs['Column_desciption'] = 'Floor Number, Floor Elevation[m], Tributary Height[m]'
- 
+            floors.append(floor_data)
+        dset = dgroup.create_dataset("Floors",data = np.array(floors))
+        dset.attrs["Description"] = "Floor information"
+        dset.attrs["Column_desciption"] = "Floor Number, Floor Elevation[m], Tributary Height[m]"
 
-class BuildingSurface():
-    
-    """
-    Surface Class
+
+class BuildingSurface:
+    """Surface Class
     Description: Contains the methods to perform surface based calculations such as generating pressure contours
 
     Attributes:
-
     name: Name associated with the surface (ie. roof, west_wall).
     taps: List of all PressureTap Objects associated with this surface.
     width: Width of the surface.
@@ -340,24 +309,23 @@ class BuildingSurface():
 
     """
 
-
     def __init__(self, name: str, bounding_vertices: list, tangent_vector_1: tuple, tangent_vector_2: tuple, origin: tuple):
-        
+
         self.name = name
         self.bounding_vertices = np.array(bounding_vertices)
         self.tangent_vector_1 = tangent_vector_1
         self.tangent_vector_2 = tangent_vector_2
         self.origin = origin
 
-        self.taps = None
+        self.taps = []
         self.polygon = WLEPolygon(bounding_vertices,origin,tangent_vector_1,tangent_vector_2)
         self.polygon.local_coordinate_parameters()
 
-    
+
     @property
     def normal_vector(self) -> np.array:
         return self.polygon.normal_vector
-    
+
 
     @property
     def bounding_dims(self) -> list:
@@ -369,15 +337,15 @@ class BuildingSurface():
         max_y = data[3]
 
         return (min_x,max_x,min_y,max_y)
-    
+
     @property
     def width(self) -> float:
         return self.polygon.width
-    
+
     @property
     def tap_id_list(self) -> list:
         return [tap.tap_id for tap in self.taps]
-    
+
     @property
     def tap_positions(self) -> tuple:
 
@@ -389,10 +357,8 @@ class BuildingSurface():
         return (tap_id, local_coords)
 
     def set_tap_parameters(self, z_axis: tuple) -> None:
+        """Assign taps parameter associated with the surface
         """
-        Assign taps parameter associated with the surface
-        """
-
         tap_coords = [tap.coords for tap in self.taps]
         area_polygons = self.polygon.voronoi_polygons(tap_coords)
 
@@ -401,12 +367,10 @@ class BuildingSurface():
             tap.normal_vector = self.normal_vector
             tap.moment_arm = self.get_moment_arm(tap,z_axis)
             tap.surface = self.name
-                
+
     def set_tap_normal_vector(self) -> None:
+        """Set the normal vector of the surface
         """
-        Set the normal vector of the surface
-        """
-        
         for tap in self.taps:
             tap.normal_vector = self.normal_vector
 
@@ -433,8 +397,8 @@ class BuildingSurface():
         x_axis = x_axis/np.linalg.norm(x_axis)
         y_axis = y_axis/np.linalg.norm(y_axis)
         z_axis = z_axis/np.linalg.norm(z_axis)
-                              
-        
+
+
         for tap in self.taps:
             force = tap.force_calculation(velocity, air_density)
 
@@ -443,7 +407,7 @@ class BuildingSurface():
             self.force_z += force*np.dot(tap.normal_vector,z_axis)
 
         return self.force_x, self.force_y, self.force_z
-    
+
     def moment_calculation(self, velocity: float, air_density: float, x_axis: tuple, y_axis: tuple, z_axis:tuple ) -> np.ndarray:
 
         self.moment_x = 0
@@ -458,18 +422,17 @@ class BuildingSurface():
             force = tap.force_calculation(velocity, air_density)
             self.moment_y += force*np.dot(tap.normal_vector,x_axis) * (tap.z - self.origin[2])
             self.moment_x += force*np.dot(tap.normal_vector,y_axis) * (tap.z - self.origin[2])
-            self.moment_z += force * -tap.moment_arm 
+            self.moment_z += force * -tap.moment_arm
 
         return self.moment_x, self.moment_y, self.moment_z
-    
-    def get_surface_data(self, method:str, skip_taps:int|list, 
-                         starting_index:int=0, 
-                         mri: float = 50, 
-                         peak_epoches: int = 10, 
+
+    def get_surface_data(self, method:str, skip_taps:int|list,
+                         starting_index:int=0,
+                         mri: float = 50,
+                         peak_epoches: int = 10,
                          duration_ratio: float = None) -> tuple:
+        """Return the method to generate surface data
         """
-        Return the method to generate surface data
-        """        
         if isinstance(skip_taps,int):
             skip_taps = [skip_taps]
 
@@ -479,47 +442,47 @@ class BuildingSurface():
         for tap in self.taps:
             if tap.tap_id in skip_taps:
                 continue
-            
+
             tap_local_position = self.polygon.global_to_local([tap.coords])[0]
             dim_1.append(tap_local_position[0])
             dim_2.append(tap_local_position[1])
-            
+
 
             match method.lower(): #TODO Move this logic outside of loop
-                case 'peak_max':
+                case "peak_max":
                     probabily_non_exceedence = 1 - 1/mri
                     value = tap.max_peak_pressure([probabily_non_exceedence],peak_epoches)
                     data.append(value[0])
-                case 'peak_min':
-                    
+                case "peak_min":
+
                     probabily_non_exceedence = 1 - 1/mri
                     value = tap.min_peak_pressure([probabily_non_exceedence],peak_epoches)
-                    data.append(value[0])  
-                    
-                case 'peak_abs':
+                    data.append(value[0])
+
+                case "peak_abs":
                     probabily_non_exceedence = 1 - 1/mri
                     max_value = tap.max_peak_pressure([probabily_non_exceedence],peak_epoches,starting_index, duration_ratio)
                     min_value = tap.min_peak_pressure([probabily_non_exceedence],peak_epoches,starting_index, duration_ratio)
-                    
+
                     data.append(max([max_value[0],min_value[0]], key=abs))
-                case 'max':
+                case "max":
                     data.append(np.max(tap.tap_cp[starting_index:]))
-                case 'min':
+                case "min":
                     data.append(np.min(tap.tap_cp[starting_index:]))
-                case 'mean':
+                case "mean":
                     data.append(np.mean(tap.tap_cp[starting_index:]))
-                case 'rms':
+                case "rms":
                     data.append(np.std(tap.tap_cp[starting_index:]))
-                case 'time_history':
+                case "time_history":
                     data.append(tap.tap_cp[starting_index:])
 
         return (dim_1, dim_2, np.array(data))
-    
-    def estimate_missing_taps(self, missing_taps: list,) -> None:
 
-        
-        
-        dim_1, dim_2, data = self.get_surface_data('time_history',missing_taps)
+    def estimate_missing_taps(self, missing_taps: list) -> None:
+
+
+
+        dim_1, dim_2, data = self.get_surface_data("time_history",missing_taps)
         tap_id_list = self.tap_id_list
         temp_missing_taps = [self.taps[tap_id_list.index(tap)] for tap in (missing_taps)]
         local_coords = np.array([np.array(self.polygon.global_to_local(global_coords=[tap.coords])[0]) for tap in temp_missing_taps])
@@ -537,7 +500,7 @@ class BuildingSurface():
 
 
     def interpolate_extrapolate_data_birep(self, dims: tuple, data: np.ndarray, output_points:np.ndarray ) -> np.ndarray:
-        
+
         dims = np.array(dims)
 
         if len(data.shape) == 1:
@@ -560,7 +523,7 @@ class BuildingSurface():
     def interpolate_extrapolate_data_rbf(self, dims: tuple, data: np.ndarray, output_points:np.ndarray ) -> np.ndarray:
 
         dims = np.array(dims).T
-        new_data = RBFInterpolator(dims, data, kernel = 'gaussian', epsilon = 1)(output_points).T
+        new_data = RBFInterpolator(dims, data, kernel = "gaussian", epsilon = 1)(output_points).T
 
         return new_data
 
@@ -575,15 +538,15 @@ class BuildingSurface():
 
         grid_x, grid_y = np.meshgrid(new_x,new_y)
 
-        inner_data = griddata(points,data, (grid_x, grid_y), method = 'cubic')
+        inner_data = griddata(points,data, (grid_x, grid_y), method = "cubic")
 
-        if extrapolate:            
+        if extrapolate:
             remove =  np.invert(np.isnan(inner_data))
 
             mod_grid_x = grid_x[remove]
             mod_grid_y = grid_y[remove]
             temp_data = inner_data[remove]
-            
+
             temp_x = np.reshape(mod_grid_x,mod_grid_x.size)
             temp_y = np.reshape(mod_grid_y,mod_grid_y.size)
             temp_data = np.reshape(temp_data,temp_data.size)
@@ -594,14 +557,14 @@ class BuildingSurface():
             # temp_data = np.array([bisplev(x,y,bisp_factors) for x,y in output_points])
             # temp_data = temp_data.reshape((len(new_x),len(new_y))).T
 
-            temp_data = griddata((temp_x,temp_y),temp_data, (grid_x, grid_y), method = 'nearest')
-            
+            temp_data = griddata((temp_x,temp_y),temp_data, (grid_x, grid_y), method = "nearest")
+
 
             inner_data[np.isnan(inner_data)] = temp_data[np.isnan(inner_data)]
 
         return grid_x, grid_y, inner_data
 
-     
+
 
     # def get_grid_data_func(self, dims:list, data:np.ndarray) -> list:
 
@@ -615,11 +578,11 @@ class BuildingSurface():
     #     zz = griddata(points.T,data,(grid_x,grid_y), method = 'cubic')
 
     #     return (grid_x, grid_y, zz, new_x, new_y)
-        
-    
+
+
     # def interpolate_extrapolate_data(self, dims: list, data: np.ndarray, output_points:list, grid:bool = False ) -> tuple:
-        
-        
+
+
     #     new_points = np.array(output_points)
     #     dims = np.array(dims).T
 
@@ -631,15 +594,15 @@ class BuildingSurface():
     #     #inner_data[np.isnan(inner_data)] = outside_data[np.isnan(inner_data)]
     #     new_data = inner_data.copy()
     #     return (new_points, new_data)
-    
+
     # def interpolate_extrapolate_data_birep(self, dims: list, data: np.ndarray, output_points:list, grid:bool = False ) -> tuple:
-        
+
     #     xb, xe, yb, ye = self.bounding_dims
 
     #     if len(data.shape) == 1:
     #         #new_data_function = RectBivariateSpline(dims[0],dims[1],data, bbox = self.bounding_dims)
     #         new_data_function = bisplrep(dims[0],dims[1], data, xb=xb, xe = xe, yb = yb, ye = ye)
-            
+
     #         new_data = [bisplev(x,y,new_data_function) for x,y in zip(output_points[0],output_points[1])]
     #     else:
     #         new_data = []
@@ -647,15 +610,15 @@ class BuildingSurface():
     #             hold_data = data[:,th]
     #             new_data_function = bisplrep(dims[0],dims[1],hold_data, xb=xb, xe = xe, yb = yb, ye = ye)
     #             new_data.append(bisplev(output_points[0],output_points[1],new_data_function))
-            
+
     #         new_data = np.array(new_data).T
-            
+
     #     if not grid:
     #         new_data = new_data.flatten()
 
     #     return (output_points, new_data)
 
-    
+
     # def estimate_missing_taps (self, missing_taps: list,) -> None:
     #     """
     #     Estimate the missing taps for the current surface
@@ -681,12 +644,11 @@ class BuildingSurface():
         points = list(itertools.product(x_point,y_point))
 
         return points, x_point, y_point
-    
+
 
 
 class BuildingFloor:
-    '''
-    Building Floor Class
+    """Building Floor Class
     Description: Contains information about building floor and the taps used to estimate the force at the current floor.
 
     General Variables:
@@ -696,9 +658,8 @@ class BuildingFloor:
         floor_elevation = the current floors elevation above the ground.
         tap_list = a list of pressure taps which are associated with the current floor. These taps will be used to estimate the force time histories of the current floor.
 
-    '''
+    """
 
-    
     def __init__(self, floor_num: int, tributary_height: list, floor_elev:float, origin:tuple) -> None:
 
         self.floor_num=floor_num
@@ -707,8 +668,8 @@ class BuildingFloor:
         self.origin = np.array(origin)
         self.tap_list =[]
         self.floor_tap_trib_area = {}
-        
-    
+
+
     def find_floor_taps(self, surfaces: list) -> None:
 
         for index in range(len(surfaces)):
@@ -717,29 +678,28 @@ class BuildingFloor:
             # check if surface is horizontal
             if np.round(np.linalg.norm(check),5) == 0:
                 continue
-            else:
-                surface_normal = surface.normal_vector/np.linalg.norm(surface.normal_vector)
-                intersection_polygon = self.create_intersection_polygon(surface)
+            surface_normal = surface.normal_vector/np.linalg.norm(surface.normal_vector)
+            intersection_polygon = self.create_intersection_polygon(surface)
 
-                tap_polygons = [tap.tributary_area for tap in surface.taps]
-                floor_tap_polygons = [polygon.intersection(intersection_polygon) for polygon in tap_polygons]
-  
-                for tap_index, tap_polygon in enumerate(floor_tap_polygons):
-                    tap_id = surface.taps[tap_index].tap_id
-                    if tap_polygon.area > 0:
-                        area = np.round(tap_polygon.area,5)
-                        moment_arm = self.get_moment_arm(tap_polygon, surface)
-                        self.floor_tap_trib_area[tap_id] = [area,surface_normal, moment_arm]
-                        self.tap_list.append(surfaces[index].taps[tap_index])
-                        
-                
+            tap_polygons = [tap.tributary_area for tap in surface.taps]
+            floor_tap_polygons = [polygon.intersection(intersection_polygon) for polygon in tap_polygons]
+
+            for tap_index, tap_polygon in enumerate(floor_tap_polygons):
+                tap_id = surface.taps[tap_index].tap_id
+                if tap_polygon.area > 0:
+                    area = np.round(tap_polygon.area,5)
+                    moment_arm = self.get_moment_arm(tap_polygon, surface)
+                    self.floor_tap_trib_area[tap_id] = [area,surface_normal, moment_arm]
+                    self.tap_list.append(surfaces[index].taps[tap_index])
+
+
     def create_intersection_polygon(self, surface: BuildingSurface) -> PolyShape:
-        
-        lower_plane = (0,0,1,-(self.elevation - self.tributary_height[0])) 
+
+        lower_plane = (0,0,1,-(self.elevation - self.tributary_height[0]))
         lower_plane = np.round(np.array(lower_plane),5)
         upper_plane = (0,0,1,-(self.elevation + self.tributary_height[1]))
         upper_plane = np.round(np.array(upper_plane),5)
-        
+
         surface_plane = surface.polygon.plane_equation()
         upper_line = plane_intersection(upper_plane,surface_plane)
         lower_line = plane_intersection(lower_plane,surface_plane)
@@ -749,8 +709,7 @@ class BuildingFloor:
         return intersection_polygon
 
     def get_moment_arm(self, area_polygon: PolyShape, building_surface:WLEPolygon) -> tuple:
-        """
-        Get the tributary area of the tap
+        """Get the tributary area of the tap
         """
         surface_normal = building_surface.normal_vector/np.linalg.norm(building_surface.normal_vector)
         area_centroid = area_polygon.centroid
@@ -761,7 +720,7 @@ class BuildingFloor:
         return moment_arm
 
     def forces_calculation(self, velocity: float, air_density: float, x_axis: tuple, y_axis: tuple, z_axis:tuple ) -> np.ndarray:
-        
+
         force_x = 0
         force_y = 0
         force_z = 0
@@ -769,12 +728,12 @@ class BuildingFloor:
         x_axis = x_axis/np.linalg.norm(x_axis)
         y_axis = y_axis/np.linalg.norm(y_axis)
         z_axis = z_axis/np.linalg.norm(z_axis)
-                              
-        
+
+
         for tap in self.tap_list:
             area, normal_vector, _ = self.floor_tap_trib_area[tap.tap_id]
             force = tap.force_calculation(velocity, air_density, area)
-            
+
             force_x += force*np.dot(normal_vector,x_axis)
             force_y += force*np.dot(normal_vector,y_axis)
             force_z += force*np.dot(normal_vector,z_axis)
@@ -793,8 +752,8 @@ class BuildingFloor:
         x_axis = x_axis/np.linalg.norm(x_axis)
         y_axis = y_axis/np.linalg.norm(y_axis)
         z_axis = z_axis/np.linalg.norm(z_axis)
-                              
-        
+
+
         for tap in self.tap_list:
 
             area, normal_vector,moment_arm = self.floor_tap_trib_area[tap.tap_id]
